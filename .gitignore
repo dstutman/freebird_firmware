@@ -1,0 +1,6 @@
+# Rust directories
+/target/
+
+# Editor directories
+/.idea/
+/.vscode/
