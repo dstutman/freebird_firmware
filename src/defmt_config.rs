@@ -17,7 +17,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
             loc.column()
         )
     } else {
-        // no location info
         defmt::error!("panicked")
     }
 

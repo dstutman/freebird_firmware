@@ -1,16 +1,19 @@
 #![no_std]
 #![no_main]
 
-mod defmt_config;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use cortex_m::{self, asm};
 use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m_rt::{entry, exception};
-use stm32f3::stm32f303;
 use defmt;
 use defmt_rtt;
+use stm32f3::stm32f303;
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::executor::Executor;
+
+mod executor;
+mod defmt_config;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -35,11 +38,19 @@ fn main() -> ! {
     let mut syst = cortex_m::Peripherals::take().unwrap().SYST;
     syst.set_clock_source(SystClkSource::Core);
     // Internal 8 MHz HSI by default
-    syst.set_reload(8_000_000 - 1);
+    syst.set_reload(8_000_000/1000 - 1);
     syst.clear_current();
     syst.enable_counter();
     syst.enable_interrupt();
 
     defmt::info!("Entering loop");
-    loop {asm::nop()};
+    let exec = Executor::new();
+    exec.run( test_future());
+}
+
+async fn test_future() {
+    loop {
+        asm::delay(8_000_000);
+        defmt::info!("Test future executed");
+    }
 }
