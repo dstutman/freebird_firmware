@@ -13,6 +13,7 @@ use stm32f3::stm32f303;
 use crate::executor::Executor;
 
 mod executor;
+mod i2c;
 mod defmt_config;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
@@ -49,8 +50,7 @@ fn main() -> ! {
 }
 
 async fn test_future() {
-    loop {
-        asm::delay(8_000_000);
-        defmt::info!("Test future executed");
-    }
+    i2c::read_register(0, 0, &mut [0, 1]).await;
+    defmt::info!("RAN");
+    loop {}
 }

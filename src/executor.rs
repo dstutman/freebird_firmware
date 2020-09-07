@@ -55,11 +55,10 @@ impl Executor {
             // move. We can guarantee this within `run` because we will never allow
             // it to escape.
             let infinite_future = unsafe {Pin::new_unchecked(&mut future)};
-            if self.flag.load(Ordering::Relaxed) {
+            if self.flag.swap(false, Ordering::Relaxed) {
                 // Safe because infinite_future must live at least as long as `run` to be passed.
                // let mut pinned_infinity = unsafe { Pin::new_unchecked(&mut infinite_future) };
                 if let Poll::Pending = infinite_future.poll(&mut context) {
-                    self.flag.store(false, Ordering::Relaxed);
                     // The system now waits for new input. New input must either trigger
                     // an interrupt, or wait for a `SysTick` exception to fire.
                     asm::wfi();
