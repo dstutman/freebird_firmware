@@ -5,7 +5,7 @@ use core::task::*;
 
 use cortex_m::asm;
 
-static flag: AtomicBool = AtomicBool::new(false);
+static flag: AtomicBool = AtomicBool::new(true);
 
 pub struct Executor;
 
@@ -44,8 +44,7 @@ impl Executor {
             // move. We can guarantee this within `run` because we will never allow
             // it to escape.
             let infinite_future = unsafe { Pin::new_unchecked(&mut future) };
-            //if flag.swap(false, Ordering::Relaxed) {
-            if true {
+            if flag.swap(false, Ordering::Relaxed) {
                 // let mut pinned_infinity = unsafe { Pin::new_unchecked(&mut infinite_future) };
                 if let Poll::Pending = infinite_future.poll(&mut context) {
                     // The system now waits for new input. New input must either trigger
