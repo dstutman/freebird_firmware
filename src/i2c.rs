@@ -1,140 +1,266 @@
-use core::future::{Future};
+use crate::executor;
+use atomic::Atomic;
+use core::future::Future;
 use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
-use core::ptr;
-use stm32f3::stm32f303::{interrupt, NVIC, Interrupt};
-use core::borrow::{Borrow, BorrowMut};
-use core::sync::atomic::{AtomicPtr, Ordering};
-use core::mem::transmute;
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::task::{Context, Poll};
+use cortex_m::asm;
+use defmt::info;
+use stm32f3::stm32f303::{interrupt, Interrupt, I2C1, NVIC};
 
-// TODO: Document all the internal contracts.
 pub enum Error {
     TooManyBytes,
-    PeripheralFailure
+    PeripheralError,
 }
 
-#[derive(Clone)]
-enum Operation {
-    PlainWrite { addr: u8, reg: u8, n_bytes: u8},
-    PlainRead,
-    RegisterRead,
-    RegisterWrite,
+#[derive(Copy, Clone)]
+enum HandlerContext {
+    RegisterRead { addr: u8, reg: u8, n_bytes: u8 },
+    RegisterWrite { addr: u8, reg: u8, n_bytes: u8 },
 }
 
-
-#[derive(Clone)]
-struct I2CFuture {
-    op: Operation,
-    success: bool,
-    waker: Option<Waker>,
-    handler_initialized: bool,
+enum Operation<'a> {
+    RegisterRead {
+        addr: u8,
+        reg: u8,
+        n_bytes: u8,
+        buff: &'a mut [u8],
+    },
+    RegisterWrite {
+        addr: u8,
+        reg: u8,
+        n_bytes: u8,
+        data: &'a [u8],
+    },
 }
 
-impl I2CFuture {
-    pub fn new(op: Operation) -> I2CFuture {
+enum FutureState {
+    Init,
+    Waiting,
+    Completed,
+}
+
+struct I2CFuture<'a> {
+    op: Operation<'a>,
+    state: FutureState,
+}
+
+impl<'a> I2CFuture<'a> {
+    pub fn new_read(op: Operation<'a>) -> I2CFuture<'a> {
         return I2CFuture {
             op,
-            success: false,
-            waker: None,
-            handler_initialized: false,
+            state: FutureState::Init,
         };
     }
 }
 
-impl Future for I2CFuture {
+impl<'a> Future for I2CFuture<'a> {
     type Output = Result<(), Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Safe because the transition to null is only in handler mode and we
-        // are in thread mode. Also this is running in a single core system
-        // so memory order isn't a problem.
-        if unsafe { LIVE_OPERATION.is_null() } {
-            if !self.handler_initialized {
-                // WARNING: This is the least safe operation in this project. The LIVE_OPERATION static raw pointer
-                // allows the interrupt to service and wake the I2CFuture. I believe this to be safe for the following
-                // reason. LIVE_OPERATION is generally a ptr::null_mut(). The future is pinned, and cannot move in memory.
-                // When an operation is requested, the future sets up the transfer by giving LIVE_OPERATION a static mutable
-                // pointer to itself. It then kicks off the ISR. The ISR runs until it has completed or failed the transfer,
-                // at which point it sets the executor to wake the Future, and sets the pointer back to null. In reality, the
-                // actual required lifetime in the static is less than the period between the start of the Future, and the Future
-                // returning Poll::Ready, but this cannot be expressed to the compiler.
-                self.waker = Some(cx.waker().clone());
-                unsafe{LIVE_OPERATION = transmute::<&mut Pin<&mut I2CFuture>, *mut Pin<&'static mut I2CFuture>>(&mut self)};
-                self.handler_initialized = true;
-                unsafe{
-                    NVIC::unmask(Interrupt::I2C1_EV_EXTI23);
-                    NVIC::pend(Interrupt::I2C1_EV_EXTI23);
-                }
-                return Poll::Pending
-            } else {
-                if self.success {
-                    return Poll::Ready(Ok(()))
+        match self.state {
+            // Try to acquire the handler "lock".
+            FutureState::Init => {
+                if !HANDLER_IN_USE.swap(true, Ordering::Relaxed) {
+                    match &self.op {
+                        Operation::RegisterRead {
+                            addr,
+                            reg,
+                            n_bytes,
+                            buff,
+                        } => {
+                            if *n_bytes > unsafe { BUFFER.len() as u8 } {
+                                self.state = FutureState::Completed;
+                                return Poll::Ready(Err(Error::TooManyBytes));
+                            }
+                            HANDLER_CONTEXT.store(
+                                Some(HandlerContext::RegisterRead {
+                                    addr: *addr,
+                                    reg: *reg,
+                                    n_bytes: *n_bytes,
+                                }),
+                                Ordering::Relaxed,
+                            );
+                        }
+                        Operation::RegisterWrite {
+                            addr,
+                            reg,
+                            n_bytes,
+                            data,
+                        } => {
+                            // If we are writing, the data to be written needs to be moved into the handler's buffer.
+                            if *n_bytes <= unsafe { BUFFER.len() as u8 } {
+                                for i in 0..*n_bytes as usize {
+                                    unsafe { BUFFER[i] = data[i] };
+                                }
+                            } else {
+                                self.state = FutureState::Completed;
+                                return Poll::Ready(Err(Error::TooManyBytes));
+                            }
+                            HANDLER_CONTEXT.store(
+                                Some(HandlerContext::RegisterWrite {
+                                    addr: *addr,
+                                    reg: *reg,
+                                    n_bytes: *n_bytes,
+                                }),
+                                Ordering::Relaxed,
+                            );
+                        }
+                    }
+                    TRANSACTION_COMPLETE.store(false, Ordering::Relaxed);
+                    self.state = FutureState::Waiting;
+                    unsafe { NVIC::pend(Interrupt::I2C1_EV_EXTI23) }
+                    return Poll::Pending;
                 } else {
-                    return Poll::Ready(Err(Error::PeripheralFailure))
+                    return Poll::Pending;
                 }
             }
-        } else {
-            self.waker = Some(cx.waker().clone());
-            return Poll::Pending
+            FutureState::Waiting => {
+                if TRANSACTION_COMPLETE.load(Ordering::Relaxed) {
+                    match &mut self.op {
+                        Operation::RegisterRead { n_bytes, buff, .. } => {
+                            // If we are reading, the data to be written needs to be moved from the handler's buffer.
+                            for i in 0..*n_bytes as usize {
+                                buff[i] = unsafe { BUFFER[i] };
+                            }
+                        }
+                        Operation::RegisterWrite { .. } => {}
+                    }
+                    self.state = FutureState::Completed;
+                    HANDLER_IN_USE.store(false, Ordering::Relaxed);
+                    cx.waker().clone().wake();
+                    return Poll::Ready(Ok(()));
+                } else {
+                    return Poll::Pending;
+                }
+            }
+            FutureState::Completed => panic!("Future polled after completion"),
         }
     }
 }
 
-enum State {
-    Init,
-    RegAddressed,
-    WritingBytes,
-    ReadingBytes,
-    Stopping,
+static HANDLER_IN_USE: AtomicBool = AtomicBool::new(false);
+static HANDLER_CONTEXT: Atomic<Option<HandlerContext>> = Atomic::new(None);
+static TRANSACTION_COMPLETE: AtomicBool = AtomicBool::new(false);
+static mut BUFFER: [u8; 16] = [0; 16];
+
+pub fn init(I2C1: I2C1) {
+    defmt::info!("Initialized");
+    I2C1.timingr.write(|w| unsafe { w.bits(0x2000090E) });
+    I2C1.cr1.write(|w| {
+        w.tcie()
+            .enabled()
+            .stopie()
+            .enabled()
+            .txie()
+            .enabled()
+            .rxie()
+            .enabled()
+            .errie()
+            .enabled()
+            .pe()
+            .enabled()
+    });
+    unsafe { NVIC::unmask(Interrupt::I2C1_EV_EXTI23) }
 }
 
-// TODO: Make an atomic RWLock type
-//struct LiveOperation {
-//    waker: Waker,
-//    operation: Operation,
-//    success: bool
-//}
-
-// Oh no, null pointer we're all gonna die...
-static mut LIVE_OPERATION: *mut Pin<&mut I2CFuture> = ptr::null_mut();
-static mut LIVE: Option<I2CFuture> = None;
-// State::Stopping for testing
-static mut OPERATIONAL_STATE: State = State::Stopping;
+enum HandlerState {
+    Init,
+    ReadRegAddressed,
+    WritingBytes,
+    ReadingBytes,
+    Stopped,
+}
 
 #[interrupt]
 fn I2C1_EV_EXTI23() {
-    // This is safe because only this interrupt and the corresponding
-    // error interrupt may modify OPERATIONAL_STATE, and they will never
-    // interrupt each other (Not strictly impossible, but not a priority).
-    // TODO: Further protections here if necessary,
-    let state = unsafe { &OPERATIONAL_STATE };
+    static mut HANDLER_STATE: HandlerState = HandlerState::Init;
+    static mut N_BYTES: u8 = 0;
 
-    // This is safe when all the code in this module operates as required.
-    // Specifically, LIVE_OPERATION must point to a valid I2CFuture before
-    // the NVIC is used to trigger the I2C1_EV_EXTI23 interrupt. Further,
-    // thread mode code may not mutate LIVE_OPERATION while it is non-null.
-    let future = unsafe {LIVE_OPERATION.as_ref().unwrap()};
+    defmt::info!("Handler");
+    // This is safe because only the EV or ER interrupts may manage the I2C peripheral.
+    // and they are mutually exclusive (scheduled with equal priority).
+    let I2C1 = unsafe { stm32f3::stm32f303::Peripherals::steal().I2C1 };
+    let op = match HANDLER_CONTEXT.load(Ordering::Relaxed) {
+        Some(op) => op,
+        None => return,
+    };
 
-    match state {
-        State::Stopping => {
-            unsafe {
-                OPERATIONAL_STATE = State::Init;
-                future.waker.clone().unwrap().wake();
-                LIVE_OPERATION = ptr::null_mut();
+    match op {
+        HandlerContext::RegisterRead { addr, reg, n_bytes } => match *HANDLER_STATE {
+            HandlerState::Init => {
+                I2C1.cr2.write(|w| {
+                    I2C1.txdr.write(|w| w.txdata().bits(reg));
+                    w.sadd()
+                        .bits((addr << 1) as u16)
+                        .autoend()
+                        .software()
+                        .rd_wrn()
+                        .write()
+                        .nbytes()
+                        .bits(1)
+                        .start()
+                        .start()
+                });
+                *HANDLER_STATE = HandlerState::ReadRegAddressed;
             }
-        }
-        _ => {}
+            HandlerState::ReadRegAddressed => {
+                I2C1.cr2.write(|w| {
+                    w.sadd()
+                        .bits((addr << 1) as u16)
+                        .rd_wrn()
+                        .read()
+                        .nbytes()
+                        .bits(n_bytes)
+                        .start()
+                        .start()
+                });
+                *HANDLER_STATE = HandlerState::ReadingBytes;
+            }
+            HandlerState::WritingBytes => {
+                panic!("WritingBytes reached but not writing");
+            }
+            HandlerState::ReadingBytes => {
+                unsafe { BUFFER[*N_BYTES as usize] = I2C1.rxdr.read().rxdata().bits() };
+                *N_BYTES += 1;
+                if *N_BYTES == n_bytes {
+                    I2C1.cr2.write(|w| w.stop().stop());
+                    *N_BYTES = 0;
+                    *HANDLER_STATE = HandlerState::Stopped;
+                }
+            }
+            HandlerState::Stopped => {
+                I2C1.icr.write(|w| w.stopcf().clear());
+                HANDLER_CONTEXT.store(None, Ordering::Relaxed);
+                TRANSACTION_COMPLETE.store(true, Ordering::Relaxed);
+                executor::force_wakeup();
+                *HANDLER_STATE = HandlerState::Init;
+            }
+        },
+        HandlerContext::RegisterWrite { addr, reg, n_bytes } => {}
     }
 }
 
-pub async fn read_register(addr: u8, reg: u8, data: &mut [u8]) -> Result<(), Error> {
-    if data.len() > 255 {
-        defmt::warn!("Tried to read more than 255 bytes over i2c");
+/* Transitions:
+Future created
+Polls... if can claim HANDLER_IN_USE
+    Sets HANDLER_CONTEXT
+    Continues until TRANSACTION_COMPLETE == false
+    If read, reads from BUFFER into buffer
+    Clears HANDLER_IN_USE
+
+*/
+
+pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), Error> {
+    if buff.len() > 255 {
         return Err(Error::TooManyBytes);
     } else {
-        I2CFuture::new(Operation::RegisterRead).await;
-        return Ok(());
+        return I2CFuture::new_read(Operation::RegisterRead {
+            addr,
+            reg,
+            n_bytes: buff.len() as u8,
+            buff,
+        })
+        .await;
     }
 }
-
-//pub async fn write_register(addr: u8, reg: u8, data: &[u8]) -> Result<(), Error> {}
