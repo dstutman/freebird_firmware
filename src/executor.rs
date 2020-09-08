@@ -9,6 +9,8 @@ static flag: AtomicBool = AtomicBool::new(true);
 
 pub struct Executor;
 
+// This is required by the task API,
+// but is basically useless in Avum's case.
 static VTABLE: RawWakerVTable = {
     unsafe fn clone(data: *const ()) -> RawWaker {
         return RawWaker::new(data, &VTABLE);
@@ -22,9 +24,7 @@ static VTABLE: RawWakerVTable = {
     unsafe fn drop(_: *const ()) {}
     RawWakerVTable::new(clone, wake, wake_by_ref, drop)
 };
-pub fn force_wakeup() {
-    flag.store(true, Ordering::Relaxed);
-}
+
 impl Executor {
     pub fn new() -> Executor {
         return Executor;
@@ -44,14 +44,16 @@ impl Executor {
             // move. We can guarantee this within `run` because we will never allow
             // it to escape.
             let infinite_future = unsafe { Pin::new_unchecked(&mut future) };
-            if flag.swap(false, Ordering::Relaxed) {
-                // let mut pinned_infinity = unsafe { Pin::new_unchecked(&mut infinite_future) };
-                if let Poll::Pending = infinite_future.poll(&mut context) {
-                    // The system now waits for new input. New input must either trigger
-                    // an interrupt, or wait for a `SysTick` exception to fire.
+            if let Poll::Pending = infinite_future.poll(&mut context) {
+                if flag.swap(false, Ordering::Relaxed) {
+                    // If a driver signaled completion during the poll, we run
+                    // again to ensure any tasks waiting on that driver can begin
+                    // executing without waiting for the next `SysTick` exception.
                     if flag.load(Ordering::Relaxed) {
                         continue;
                     }
+                    // The system now waits for new input. New input must either trigger
+                    // an interrupt, or wait for a `SysTick` exception to fire.
                     asm::wfe()
                 } else {
                     panic!();
@@ -59,4 +61,8 @@ impl Executor {
             }
         }
     }
+}
+
+pub fn force_wakeup() {
+    flag.store(true, Ordering::Relaxed);
 }

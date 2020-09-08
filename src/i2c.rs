@@ -146,26 +146,6 @@ static HANDLER_CONTEXT: Atomic<Option<HandlerContext>> = Atomic::new(None);
 static TRANSACTION_COMPLETE: AtomicBool = AtomicBool::new(false);
 static mut BUFFER: [u8; 16] = [0; 16];
 
-pub fn init(I2C1: I2C1) {
-    defmt::info!("Initialized");
-    I2C1.timingr.write(|w| unsafe { w.bits(0x2000090E) });
-    I2C1.cr1.write(|w| {
-        w.tcie()
-            .enabled()
-            .stopie()
-            .enabled()
-            .txie()
-            .enabled()
-            .rxie()
-            .enabled()
-            .errie()
-            .enabled()
-            .pe()
-            .enabled()
-    });
-    unsafe { NVIC::unmask(Interrupt::I2C1_EV_EXTI23) }
-}
-
 enum HandlerState {
     Init,
     ReadRegAddressed,
@@ -179,7 +159,6 @@ fn I2C1_EV_EXTI23() {
     static mut HANDLER_STATE: HandlerState = HandlerState::Init;
     static mut N_BYTES: u8 = 0;
 
-    defmt::info!("Handler");
     // This is safe because only the EV or ER interrupts may manage the I2C peripheral.
     // and they are mutually exclusive (scheduled with equal priority).
     let I2C1 = unsafe { stm32f3::stm32f303::Peripherals::steal().I2C1 };
@@ -279,15 +258,24 @@ fn I2C1_EV_EXTI23() {
     }
 }
 
-/* Transitions:
-Future created
-Polls... if can claim HANDLER_IN_USE
-    Sets HANDLER_CONTEXT
-    Continues until TRANSACTION_COMPLETE == false
-    If read, reads from BUFFER into buffer
-    Clears HANDLER_IN_USE
-
-*/
+pub fn init(I2C1: I2C1) {
+    I2C1.timingr.write(|w| unsafe { w.bits(0x0000020B) });
+    I2C1.cr1.write(|w| {
+        w.tcie()
+            .enabled()
+            .stopie()
+            .enabled()
+            .txie()
+            .enabled()
+            .rxie()
+            .enabled()
+            .errie()
+            .enabled()
+            .pe()
+            .enabled()
+    });
+    unsafe { NVIC::unmask(Interrupt::I2C1_EV_EXTI23) }
+}
 
 pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), Error> {
     if buff.len() > 255 {

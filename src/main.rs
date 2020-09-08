@@ -8,10 +8,11 @@ use cortex_m::{self, asm};
 use cortex_m_rt::{entry, exception};
 use defmt;
 use defmt_rtt;
-use futures::future::join5;
+use futures::future::join;
 use stm32f3::stm32f303;
 
 use crate::executor::Executor;
+use futures::TryFutureExt;
 
 mod defmt_config;
 mod executor;
@@ -37,11 +38,11 @@ fn timestamp() -> u64 {
 #[entry]
 fn main() -> ! {
     let mut cp = stm32f303::CorePeripherals::take().unwrap();
-    //cp.SYST.set_clock_source(SystClkSource::Core);
-    //cp.SYST.set_reload(72000000 / 1000 - 1);
-    //cp.SYST.clear_current();
-    //cp.SYST.enable_counter();
-    //cp.SYST.enable_interrupt();
+    cp.SYST.set_clock_source(SystClkSource::Core);
+    cp.SYST.set_reload(72000000 / 1000 - 1);
+    cp.SYST.clear_current();
+    cp.SYST.enable_counter();
+    cp.SYST.enable_interrupt();
 
     let dp = stm32f303::Peripherals::take().unwrap();
     dp.FLASH.acr.write(|w| w.latency().ws2());
@@ -77,26 +78,20 @@ fn main() -> ! {
 }
 
 async fn test_future() {
-    let mut val = [1; 1];
-    let mut val2 = [1; 1];
-    let mut val3 = [0; 1];
-    let mut val4 = [0; 1];
-    let mut val5 = [5; 1];
-    join5(
-        i2c::read_register(0x6B, 0x0F, &mut val),
-        i2c::read_register(0x6B, 0x1E, &mut val2),
-        i2c::read_register(0x6B, 0x0F, &mut val3),
-        i2c::read_register(0x6B, 0x0E, &mut val4),
-        i2c::write_register(0x6B, 0x1E, &mut val5),
-    )
-    .await;
+    let mut xl = [0; 6];
+    let mut gyro = [0; 6];
+    let start = get_ticks();
+    for i in 0..1000 {
+        join(
+            i2c::read_register(0x6B, 0x18, &mut xl),
+            i2c::read_register(0x6B, 0x28, &mut gyro),
+        )
+        .await;
+    }
     defmt::info!(
-        "Data was: {:[u8]}, {:[u8]}, {:[u8]}, {:[u8]}, {:[u8]}",
-        val,
-        val2,
-        val3,
-        val4,
-        val5
+        "Started: {:usize} ticks, Finished [1000]: {:usize} ticks",
+        start,
+        get_ticks()
     );
     loop {}
 }
