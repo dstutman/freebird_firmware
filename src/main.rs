@@ -8,10 +8,10 @@ use cortex_m::{self, asm};
 use cortex_m_rt::{entry, exception};
 use defmt;
 use defmt_rtt;
+use futures::future::join5;
 use stm32f3::stm32f303;
 
 use crate::executor::Executor;
-use futures::future::join5;
 
 mod defmt_config;
 mod executor;

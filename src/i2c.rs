@@ -1,12 +1,14 @@
-use crate::executor;
-use atomic::Atomic;
 use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
+
+use atomic::Atomic;
 use cortex_m::asm;
 use defmt::info;
 use stm32f3::stm32f303::{interrupt, Interrupt, I2C1, NVIC};
+
+use crate::executor;
 
 pub enum Error {
     TooManyBytes,
