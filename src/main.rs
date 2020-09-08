@@ -81,13 +81,13 @@ async fn test_future() {
     let mut val2 = [1; 1];
     let mut val3 = [0; 1];
     let mut val4 = [0; 1];
-    let mut val5 = [0; 1];
+    let mut val5 = [5; 1];
     join5(
         i2c::read_register(0x6B, 0x0F, &mut val),
         i2c::read_register(0x6B, 0x1E, &mut val2),
         i2c::read_register(0x6B, 0x0F, &mut val3),
         i2c::read_register(0x6B, 0x0E, &mut val4),
-        i2c::read_register(0x6B, 0x1E, &mut val5),
+        i2c::write_register(0x6B, 0x1E, &mut val5),
     )
     .await;
     defmt::info!(

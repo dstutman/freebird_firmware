@@ -46,7 +46,7 @@ struct I2CFuture<'a> {
 }
 
 impl<'a> I2CFuture<'a> {
-    pub fn new_read(op: Operation<'a>) -> I2CFuture<'a> {
+    pub fn new(op: Operation<'a>) -> I2CFuture<'a> {
         return I2CFuture {
             op,
             state: FutureState::Init,
@@ -237,7 +237,43 @@ fn I2C1_EV_EXTI23() {
                 *HANDLER_STATE = HandlerState::Init;
             }
         },
-        HandlerContext::RegisterWrite { addr, reg, n_bytes } => {}
+        HandlerContext::RegisterWrite { addr, reg, n_bytes } => match *HANDLER_STATE {
+            HandlerState::Init => {
+                I2C1.cr2.write(|w| {
+                    I2C1.txdr.write(|w| w.txdata().bits(reg));
+                    w.sadd()
+                        .bits((addr << 1) as u16)
+                        .autoend()
+                        .automatic()
+                        .rd_wrn()
+                        .write()
+                        .nbytes()
+                        .bits(1 + n_bytes)
+                        .start()
+                        .start()
+                });
+                *HANDLER_STATE = HandlerState::WritingBytes;
+            }
+            HandlerState::ReadRegAddressed => panic!("ReadRegAddressed reached but not reading"),
+            HandlerState::WritingBytes => {
+                I2C1.txdr
+                    .write(|w| w.txdata().bits(unsafe { BUFFER[*N_BYTES as usize] }));
+                *N_BYTES += 1;
+                if *N_BYTES == n_bytes {
+                    I2C1.cr2.write(|w| w.stop().stop());
+                    *N_BYTES = 0;
+                    *HANDLER_STATE = HandlerState::Stopped;
+                }
+            }
+            HandlerState::ReadingBytes => panic!("ReadingBytes reached but not reading"),
+            HandlerState::Stopped => {
+                I2C1.icr.write(|w| w.stopcf().clear());
+                HANDLER_CONTEXT.store(None, Ordering::Relaxed);
+                TRANSACTION_COMPLETE.store(true, Ordering::Relaxed);
+                executor::force_wakeup();
+                *HANDLER_STATE = HandlerState::Init;
+            }
+        },
     }
 }
 
@@ -255,11 +291,25 @@ pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), Err
     if buff.len() > 255 {
         return Err(Error::TooManyBytes);
     } else {
-        return I2CFuture::new_read(Operation::RegisterRead {
+        return I2CFuture::new(Operation::RegisterRead {
             addr,
             reg,
             n_bytes: buff.len() as u8,
             buff,
+        })
+        .await;
+    }
+}
+
+pub async fn write_register(addr: u8, reg: u8, data: &[u8]) -> Result<(), Error> {
+    if data.len() > 255 {
+        return Err(Error::TooManyBytes);
+    } else {
+        return I2CFuture::new(Operation::RegisterWrite {
+            addr,
+            reg,
+            n_bytes: data.len() as u8,
+            data,
         })
         .await;
     }
