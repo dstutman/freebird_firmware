@@ -44,8 +44,8 @@ impl Executor {
             // move. We can guarantee this within `run` because we will never allow
             // it to escape.
             let infinite_future = unsafe { Pin::new_unchecked(&mut future) };
-            if let Poll::Pending = infinite_future.poll(&mut context) {
-                if flag.swap(false, Ordering::Relaxed) {
+            if flag.swap(false, Ordering::Relaxed) {
+                if let Poll::Pending = infinite_future.poll(&mut context) {
                     // If a driver signaled completion during the poll, we run
                     // again to ensure any tasks waiting on that driver can begin
                     // executing without waiting for the next `SysTick` exception.

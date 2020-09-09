@@ -10,7 +10,7 @@ use stm32f3::stm32f303::{interrupt, Interrupt, I2C1, NVIC};
 
 use crate::executor;
 
-pub enum Error {
+pub enum I2CError {
     TooManyBytes,
     PeripheralError,
 }
@@ -57,7 +57,7 @@ impl<'a> I2CFuture<'a> {
 }
 
 impl<'a> Future for I2CFuture<'a> {
-    type Output = Result<(), Error>;
+    type Output = Result<(), I2CError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state {
@@ -73,7 +73,7 @@ impl<'a> Future for I2CFuture<'a> {
                         } => {
                             if *n_bytes > unsafe { BUFFER.len() as u8 } {
                                 self.state = FutureState::Completed;
-                                return Poll::Ready(Err(Error::TooManyBytes));
+                                return Poll::Ready(Err(I2CError::TooManyBytes));
                             }
                             HANDLER_CONTEXT.store(
                                 Some(HandlerContext::RegisterRead {
@@ -97,7 +97,7 @@ impl<'a> Future for I2CFuture<'a> {
                                 }
                             } else {
                                 self.state = FutureState::Completed;
-                                return Poll::Ready(Err(Error::TooManyBytes));
+                                return Poll::Ready(Err(I2CError::TooManyBytes));
                             }
                             HANDLER_CONTEXT.store(
                                 Some(HandlerContext::RegisterWrite {
@@ -170,8 +170,9 @@ fn I2C1_EV_EXTI23() {
     match op {
         HandlerContext::RegisterRead { addr, reg, n_bytes } => match *HANDLER_STATE {
             HandlerState::Init => {
+                *N_BYTES = 0;
+                I2C1.txdr.write(|w| w.txdata().bits(reg));
                 I2C1.cr2.write(|w| {
-                    I2C1.txdr.write(|w| w.txdata().bits(reg));
                     w.sadd()
                         .bits((addr << 1) as u16)
                         .autoend()
@@ -189,6 +190,8 @@ fn I2C1_EV_EXTI23() {
                 I2C1.cr2.write(|w| {
                     w.sadd()
                         .bits((addr << 1) as u16)
+                        .autoend()
+                        .automatic()
                         .rd_wrn()
                         .read()
                         .nbytes()
@@ -205,8 +208,6 @@ fn I2C1_EV_EXTI23() {
                 unsafe { BUFFER[*N_BYTES as usize] = I2C1.rxdr.read().rxdata().bits() };
                 *N_BYTES += 1;
                 if *N_BYTES == n_bytes {
-                    I2C1.cr2.write(|w| w.stop().stop());
-                    *N_BYTES = 0;
                     *HANDLER_STATE = HandlerState::Stopped;
                 }
             }
@@ -220,8 +221,9 @@ fn I2C1_EV_EXTI23() {
         },
         HandlerContext::RegisterWrite { addr, reg, n_bytes } => match *HANDLER_STATE {
             HandlerState::Init => {
+                *N_BYTES = 0;
+                I2C1.txdr.write(|w| w.txdata().bits(reg));
                 I2C1.cr2.write(|w| {
-                    I2C1.txdr.write(|w| w.txdata().bits(reg));
                     w.sadd()
                         .bits((addr << 1) as u16)
                         .autoend()
@@ -241,8 +243,6 @@ fn I2C1_EV_EXTI23() {
                     .write(|w| w.txdata().bits(unsafe { BUFFER[*N_BYTES as usize] }));
                 *N_BYTES += 1;
                 if *N_BYTES == n_bytes {
-                    I2C1.cr2.write(|w| w.stop().stop());
-                    *N_BYTES = 0;
                     *HANDLER_STATE = HandlerState::Stopped;
                 }
             }
@@ -277,9 +277,9 @@ pub fn init(I2C1: I2C1) {
     unsafe { NVIC::unmask(Interrupt::I2C1_EV_EXTI23) }
 }
 
-pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), Error> {
+pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), I2CError> {
     if buff.len() > 255 {
-        return Err(Error::TooManyBytes);
+        return Err(I2CError::TooManyBytes);
     } else {
         return I2CFuture::new(Operation::RegisterRead {
             addr,
@@ -291,9 +291,9 @@ pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), Err
     }
 }
 
-pub async fn write_register(addr: u8, reg: u8, data: &[u8]) -> Result<(), Error> {
+pub async fn write_register(addr: u8, reg: u8, data: &[u8]) -> Result<(), I2CError> {
     if data.len() > 255 {
-        return Err(Error::TooManyBytes);
+        return Err(I2CError::TooManyBytes);
     } else {
         return I2CFuture::new(Operation::RegisterWrite {
             addr,
