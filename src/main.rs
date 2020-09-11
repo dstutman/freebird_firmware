@@ -17,6 +17,7 @@ use futures::TryFutureExt;
 mod defmt_config;
 mod executor;
 mod i2c;
+mod lsm;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -78,20 +79,6 @@ fn main() -> ! {
 }
 
 async fn test_future() {
-    let mut xl = [0; 6];
-    let mut gyro = [0; 6];
-    let start = get_ticks();
-    for i in 0..1000 {
-        join(
-            i2c::read_register(0x6B, 0x18, &mut xl),
-            i2c::read_register(0x6B, 0x28, &mut gyro),
-        )
-        .await;
-    }
-    defmt::info!(
-        "Started: {:usize} ticks, Finished [1000]: {:usize} ticks",
-        start,
-        get_ticks()
-    );
+    let settings = lsm::Settings::default().init().await.unwrap();
     loop {}
 }

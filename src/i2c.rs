@@ -1,3 +1,5 @@
+// TODO: Really need error detection and/or handling.
+
 use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
