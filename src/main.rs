@@ -79,6 +79,9 @@ fn main() -> ! {
 }
 
 async fn test_future() {
-    let settings = lsm::Settings::default().init().await.unwrap();
-    loop {}
+    let lsm = lsm::Settings::default().init().await.unwrap();
+    loop {
+        let sample = lsm.acceleration().await.unwrap();
+        defmt::info!("({:f32}, {:f32}, {:f32})", sample.ax, sample.ay, sample.az);
+    }
 }

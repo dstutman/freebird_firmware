@@ -80,27 +80,30 @@ pub enum AccelFS {
     G8 = 0b11 << FS_XL_SHIFT,
 }
 
+const OUT_XYZXL_ADDR: u8 = 0x28;
+const OUT_XYZXL_BYTES: usize = 6;
+
 // MAG
 // WHOAMI
 const WHOAMI_M_ADDR: u8 = 0x0F;
 const WHOAMI_M_BYTES: usize = 1;
 
-struct AccelReading {
-    ax: f32,
-    ay: f32,
-    az: f32,
+pub struct AccelReading {
+    pub ax: f32,
+    pub ay: f32,
+    pub az: f32,
 }
 
-struct GyroReading {
-    gx: f32,
-    gy: f32,
-    gz: f32,
+pub struct GyroReading {
+    pub gx: f32,
+    pub gy: f32,
+    pub gz: f32,
 }
 
 struct MagReading {
-    mx: f32,
-    my: f32,
-    mz: f32,
+    pub mx: f32,
+    pub my: f32,
+    pub mz: f32,
 }
 
 #[derive(Copy, Clone)]
@@ -163,12 +166,10 @@ impl Settings {
         write_register(self.acc_gyro_addr, CTRL_1G_ADDR, &[ctrl_1g]).await;
 
         let mut ctrl_6xl = modify_bits(CTRL_6XL_RESET, ODR_XL_MASK, self.acc_odr as u8);
-        ctrl_1g = modify_bits(ctrl_6xl, FS_XL_MASK, self.accel_fs as u8);
+        ctrl_6xl = modify_bits(ctrl_6xl, FS_XL_MASK, self.accel_fs as u8);
         write_register(self.acc_gyro_addr, CTRL_6XL_ADDR, &[ctrl_6xl]).await;
         return Ok(LSM { settings: self });
     }
-
-    pub async fn acceleration(&self) -> AccelReading {}
 }
 
 #[derive(Debug)]
@@ -181,4 +182,14 @@ pub struct LSM {
     settings: Settings,
 }
 
-impl LSM {}
+impl LSM {
+    pub async fn acceleration(&self) -> Result<AccelReading, I2CError> {
+        let mut xyz_xl = [0; OUT_XYZXL_BYTES];
+        read_register(self.settings.acc_gyro_addr, OUT_XYZXL_ADDR, &mut xyz_xl).await?;
+        return Ok(AccelReading {
+            ax: ((xyz_xl[0] as i16) | ((xyz_xl[1] as i16) << 8)) as f32 * 8.0 / 32768.0,
+            ay: ((xyz_xl[2] as i16) | ((xyz_xl[3] as i16) << 8)) as f32 * 8.0 / 32768.0,
+            az: ((xyz_xl[4] as i16) | ((xyz_xl[5] as i16) << 8)) as f32 * 8.0 / 32768.0,
+        });
+    }
+}

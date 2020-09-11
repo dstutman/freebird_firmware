@@ -12,6 +12,7 @@ use stm32f3::stm32f303::{interrupt, Interrupt, I2C1, NVIC};
 
 use crate::executor;
 
+#[derive(Debug)]
 pub enum I2CError {
     TooManyBytes,
     PeripheralError,
