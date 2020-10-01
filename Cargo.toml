@@ -12,11 +12,14 @@ cortex-m-rt = "0.6.12"
 stm32f3 = { version = "0.11.0", features = ["stm32f303", "rt"] }
 atomic = "0.5.0"
 futures = { version = "0.3.5", default-features = false }
-defmt = { git = "https://github.com/knurling-rs/defmt", branch = "main" }
-defmt-rtt = { git = "https://github.com/knurling-rs/defmt", branch = "main" }
+rtt-target = { version = "0.2.2", features = ["cortex-m"] }
+panic-rtt-target = { version = "0.1.1", features = ["cortex-m"] }
 
 [features]
 default = [
     "defmt-default"
 ]
 defmt-default = []
+
+[profile.release]
+debug = 1

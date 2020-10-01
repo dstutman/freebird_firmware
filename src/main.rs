@@ -6,15 +6,16 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::{self, asm};
 use cortex_m_rt::{entry, exception};
-use defmt;
-use defmt_rtt;
+//use defmt;
+//use defmt_rtt;
 use futures::future::join;
 use stm32f3::stm32f303;
 
 use crate::executor::Executor;
 use futures::TryFutureExt;
 
-mod defmt_config;
+use panic_rtt_target as _;
+use rtt_target::{rprintln, rtt_init_print};
 mod executor;
 mod i2c;
 mod lsm;
@@ -31,13 +32,9 @@ fn SysTick() {
     let _ = TICKS.fetch_add(1, Ordering::Relaxed);
 }
 
-#[defmt::timestamp]
-fn timestamp() -> u64 {
-    return (get_ticks() * 1000) as u64;
-}
-
 #[entry]
 fn main() -> ! {
+    rtt_init_print!();
     let mut cp = stm32f303::CorePeripherals::take().unwrap();
     cp.SYST.set_clock_source(SystClkSource::Core);
     cp.SYST.set_reload(72000000 / 1000 - 1);
@@ -73,7 +70,7 @@ fn main() -> ! {
     gpiob.afrh.write(|w| w.afrh8().af4().afrh9().af4());
     dp.RCC.apb1enr.write(|w| w.i2c1en().enabled());
     i2c::init(dp.I2C1);
-    defmt::info!("Entering loop");
+    rprintln!("Starting executor...");
     let exec = Executor::new();
     exec.run(test_future());
 }
@@ -81,7 +78,15 @@ fn main() -> ! {
 async fn test_future() {
     let lsm = lsm::Settings::default().init().await.unwrap();
     loop {
-        let sample = lsm.acceleration().await.unwrap();
-        defmt::info!("({:f32}, {:f32}, {:f32})", sample.ax, sample.ay, sample.az);
+        let mut xvg = 0.0;
+        let mut yvg = 0.0;
+        let mut zvg = 0.0;
+        for _ in 0..1000 {
+            let sample = lsm.acceleration().await.unwrap();
+            xvg +=  sample.ax / 1000.0;
+            yvg += sample.ay / 1000.0;
+            zvg += sample.az / 1000.0;
+        }
+        rprintln!("Acc Sample: ({}, {}, {})", xvg, yvg, zvg);
     }
 }
