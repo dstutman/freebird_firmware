@@ -14,10 +14,10 @@ use futures::TryFutureExt;
 
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
+mod bmp;
 mod executor;
 mod i2c;
 mod lsm;
-mod bmp;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -88,14 +88,27 @@ async fn test_future() {
     //    }
     //    rprintln!("Acc Sample: ({}, {}, {})", xvg, yvg, zvg);
     //}
+    let lsm = lsm::Settings::default().init().await.unwrap();
     let bmp = bmp::Settings::default().init().await.unwrap();
     let mut last_ticks = 0;
     loop {
         if last_ticks - get_ticks() > 500 {
             last_ticks = get_ticks();
             asm::delay(8_000_000);
-            let sample = bmp.pressure_temperature().await.unwrap();
-            rprintln!("{}", sample.press)
+            let acc_sample = lsm.acceleration().await.unwrap();
+            let rate_sample = lsm.angular_rate().await.unwrap();
+            let bmp_sample = bmp.pressure_temperature().await.unwrap();
+            rprintln!(
+                "(ax, ay, az): ({}, {}, {}), (gx, gy, gz): ({}, {}, {}), (p, t): ({}, {})",
+                acc_sample.ax,
+                acc_sample.ay,
+                acc_sample.az,
+                rate_sample.gx,
+                rate_sample.gy,
+                rate_sample.gz,
+                bmp_sample.press,
+                bmp_sample.temp
+            );
         }
     }
 }
