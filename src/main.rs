@@ -6,8 +6,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::{self, asm};
 use cortex_m_rt::{entry, exception};
-//use defmt;
-//use defmt_rtt;
 use futures::future::join;
 use stm32f3::stm32f303;
 
@@ -19,6 +17,7 @@ use rtt_target::{rprintln, rtt_init_print};
 mod executor;
 mod i2c;
 mod lsm;
+mod bmp;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -76,17 +75,27 @@ fn main() -> ! {
 }
 
 async fn test_future() {
-    let lsm = lsm::Settings::default().init().await.unwrap();
+    //let lsm = lsm::Settings::default().init().await.unwrap();
+    //loop {
+    //    let mut xvg = 0.0;
+    //    let mut yvg = 0.0;
+    //    let mut zvg = 0.0;
+    //    for _ in 0..1000 {
+    //        let sample = lsm.acceleration().await.unwrap();
+    //        xvg +=  sample.ax / 1000.0;
+    //        yvg += sample.ay / 1000.0;
+    //        zvg += sample.az / 1000.0;
+    //    }
+    //    rprintln!("Acc Sample: ({}, {}, {})", xvg, yvg, zvg);
+    //}
+    let bmp = bmp::Settings::default().init().await.unwrap();
+    let mut last_ticks = 0;
     loop {
-        let mut xvg = 0.0;
-        let mut yvg = 0.0;
-        let mut zvg = 0.0;
-        for _ in 0..1000 {
-            let sample = lsm.acceleration().await.unwrap();
-            xvg +=  sample.ax / 1000.0;
-            yvg += sample.ay / 1000.0;
-            zvg += sample.az / 1000.0;
+        if last_ticks - get_ticks() > 500 {
+            last_ticks = get_ticks();
+            asm::delay(8_000_000);
+            let sample = bmp.pressure_temperature().await.unwrap();
+            rprintln!("{}", sample.press)
         }
-        rprintln!("Acc Sample: ({}, {}, {})", xvg, yvg, zvg);
     }
 }

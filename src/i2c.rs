@@ -146,7 +146,7 @@ impl<'a> Future for I2CFuture<'a> {
 static HANDLER_IN_USE: AtomicBool = AtomicBool::new(false);
 static HANDLER_CONTEXT: Atomic<Option<HandlerContext>> = Atomic::new(None);
 static TRANSACTION_COMPLETE: AtomicBool = AtomicBool::new(false);
-static mut BUFFER: [u8; 16] = [0; 16];
+static mut BUFFER: [u8; 32] = [0; 32];
 
 enum HandlerState {
     Init,
