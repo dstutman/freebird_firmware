@@ -4,3 +4,6 @@
 # Editor directories
 /.idea/
 /.vscode/
+
+# Vim tags
+tags
