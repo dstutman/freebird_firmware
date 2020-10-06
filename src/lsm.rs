@@ -149,7 +149,7 @@ impl Default for Settings {
             mag_addr: 0x1E,
             acc_odr: AccODR::HZ952,
             gyro_odr: GyroODR::HZ952,
-            acc_fs: AccFS::G8,
+            acc_fs: AccFS::G16,
             gyro_fs: GyroFS::DPS500,
         };
     }
