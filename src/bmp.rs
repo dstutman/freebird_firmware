@@ -3,10 +3,10 @@ use core::future::Future;
 use core::ops::Add;
 use core::slice;
 use cortex_m::asm;
-use rtt_target::{rprintln};
+use rtt_target::rprintln;
 
 fn modify_bits(orig: u8, mask: u8, new: u8) -> u8 {
-    return (orig | !mask) | new;
+    return (orig & !mask) | new;
 }
 
 // DIG (Trimming)
@@ -42,7 +42,7 @@ const OSRSP_MASK: u8 = 0b111 << OSRSP_OFFSET;
 #[repr(u8)]
 #[derive(Copy, Clone)]
 enum PressOversample {
-    PressDisabled = 0   << OSRSP_OFFSET,
+    PressDisabled = 0 << OSRSP_OFFSET,
     X1 = 0b001 << OSRSP_OFFSET,
     X2 = 0b010 << OSRSP_OFFSET,
     X4 = 0b011 << OSRSP_OFFSET,
@@ -138,7 +138,7 @@ impl Default for Settings {
             addr: 0x77,
             press_oversample: PressOversample::X16,
             temp_oversample: TempOversample::X2,
-            standby_duration: StandbyDuration::MS500,
+            standby_duration: StandbyDuration::MS125,
             filter: Filter::X16,
         };
     }
@@ -171,14 +171,15 @@ impl Settings {
         let mut ctrl_meas = modify_bits(CTRL_MEAS_RESET, MODE_MASK, Mode::Normal as u8);
         ctrl_meas = modify_bits(ctrl_meas, OSRSP_MASK, self.press_oversample as u8);
         ctrl_meas = modify_bits(ctrl_meas, OSRST_MASK, self.temp_oversample as u8);
-        write_register(self.addr, CTRL_MEAS_ADDR, &[ctrl_meas]).await.unwrap();
+        write_register(self.addr, CTRL_MEAS_ADDR, &[ctrl_meas])
+            .await
+            .unwrap();
 
-        // For some reason, using this register results in bad data out. I do not know why.
-        // The default configuration works fine, so leave it at that for now.
-        //let mut config = modify_bits(CONFIG_RESET, FILTER_MASK, self.filter as u8);
-        //config = modify_bits(config, TSB_MASK, self.standby_duration as u8);
-        //write_register(self.addr, CONFIG_ADDR, &[config]).await.unwrap();
-
+        let mut config = modify_bits(CONFIG_RESET, FILTER_MASK, self.filter as u8);
+        config = modify_bits(config, TSB_MASK, self.standby_duration as u8);
+        write_register(self.addr, CONFIG_ADDR, &[config])
+            .await
+            .unwrap();
 
         let mut trimming = [0; DIG_T_P_BYTES];
         read_register(self.addr, DIG_T_P_ADDR, &mut trimming).await;
@@ -219,14 +220,22 @@ impl BMP {
         read_register(self.settings.addr, PRESS_TEMP_ADDR, &mut press_temp).await?;
 
         // The unsigned pressure and temperature
-        let u_press = ((press_temp[0] as u32) << 12) | ((press_temp[1] as u32) << 4) | ((press_temp[2] as u32) >> 4);
-        let u_temp = ((press_temp[3] as u32) << 12) | ((press_temp[4] as u32) << 4) | ((press_temp[5] as u32) >> 4);
+        // Can't use integer from bytes methods because XLSB is not a full byte
+        let u_press = ((press_temp[0] as u32) << 12)
+            | ((press_temp[1] as u32) << 4)
+            | ((press_temp[2] as u32) >> 4);
+        let u_temp = ((press_temp[3] as u32) << 12)
+            | ((press_temp[4] as u32) << 4)
+            | ((press_temp[5] as u32) >> 4);
 
         // Trim the temperature and pressure
         // Adaptation of the datasheet description
         let temp_fine = {
-            let var1 = ((u_temp as f32) / 16384.0 - (self.trimming.t1 as f32) / 1024.0) * (self.trimming.t2 as f32);
-            let var2 = ((u_temp as f32) / 131072.0 - (self.trimming.t1 as f32) / 8192.0) * ((u_temp as f32) / 131072.0 - (self.trimming.t1 as f32) / 8192.0) * (self.trimming.t3 as f32);
+            let var1 = ((u_temp as f32) / 16384.0 - (self.trimming.t1 as f32) / 1024.0)
+                * (self.trimming.t2 as f32);
+            let var2 = ((u_temp as f32) / 131072.0 - (self.trimming.t1 as f32) / 8192.0)
+                * ((u_temp as f32) / 131072.0 - (self.trimming.t1 as f32) / 8192.0)
+                * (self.trimming.t3 as f32);
             var1 + var2
         };
 
@@ -235,7 +244,9 @@ impl BMP {
             let mut var2 = var1 * var1 * ((self.trimming.p6 as f32) / 32768.0);
             var2 = var2 + var1 * (self.trimming.p5 as f32) / 2.0;
             var2 = var2 / 4.0 + (self.trimming.p4 as f32) * 65536.0;
-            var1 = ((self.trimming.p3 as f32) * var1 * var1 / 524288.0 + (self.trimming.p2 as f32) * var1) / 524288.0;
+            var1 = ((self.trimming.p3 as f32) * var1 * var1 / 524288.0
+                + (self.trimming.p2 as f32) * var1)
+                / 524288.0;
             var1 = (1.0 + var1 / 32768.0) * (self.trimming.p1 as f32);
             let mut p = 1048576.0 - (u_press as f32);
             p = (p - var2 / 4096.0) * 6250.0 / var1;

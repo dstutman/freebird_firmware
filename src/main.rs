@@ -99,7 +99,7 @@ async fn test_future() {
             let rate_sample = lsm.angular_rate().await.unwrap();
             let bmp_sample = bmp.pressure_temperature().await.unwrap();
             rprintln!(
-                "(ax, ay, az): ({}, {}, {}), (gx, gy, gz): ({}, {}, {}), (p, t): ({}, {})",
+                "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
                 acc_sample.ax,
                 acc_sample.ay,
                 acc_sample.az,
