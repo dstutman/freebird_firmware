@@ -5,11 +5,7 @@ use core::slice;
 use cortex_m::asm;
 
 fn modify_bits(orig: u8, mask: u8, new: u8) -> u8 {
-    return (orig | !mask) | new;
-}
-
-fn rescale(raw: i16, full_scale: u16) -> f32 {
-    return (raw as f32) / (i16::MAX as f32) * (full_scale as f32);
+    return (orig & !mask) | new;
 }
 
 // ACC GYRO
@@ -36,26 +32,22 @@ enum GyroODR {
     HZ952 = 0b110 << ODR_G_SHIFT,
 }
 
-const FS_G_SHIFT: u8 = 2;
+const FS_G_SHIFT: u8 = 3;
 const FS_G_MASK: u8 = 0b11 << FS_G_SHIFT;
 #[repr(u8)]
 #[derive(Copy, Clone)]
 pub enum GyroFS {
     DPS245 = 0b00 << FS_G_SHIFT,
-    DPS500 = 0b10 << FS_G_SHIFT,
+    DPS500 = 0b01 << FS_G_SHIFT,
     DPS2000 = 0b11 << FS_G_SHIFT,
 }
 
-fn gyro_fs_to_numeric(fs: GyroFS) -> u16 {
-    return match (fs) {
-        GyroFS::DPS245 => 245,
-        GyroFS::DPS500 => 500,
-        GyroFS::DPS2000 => 2000,
+fn gyro_fs_to_numeric(fs: GyroFS) -> f32 {
+    return match fs {
+        GyroFS::DPS245 => 8.75 / 1000.0,
+        GyroFS::DPS500 => 17.50 / 1000.0,
+        GyroFS::DPS2000 => 70.0 / 1000.0,
     };
-}
-
-fn rescale_gyro(raw: i16, fs: GyroFS) -> f32 {
-    return rescale(raw, gyro_fs_to_numeric(fs));
 }
 
 // OUT_TEMP_L and OUT_TEMP_H
@@ -85,7 +77,7 @@ enum AccODR {
     HZ952 = 0b110 << ODR_XL_SHIFT,
 }
 
-const FS_XL_SHIFT: u8 = 2;
+const FS_XL_SHIFT: u8 = 3;
 const FS_XL_MASK: u8 = 0b11 << FS_XL_SHIFT;
 #[repr(u8)]
 #[derive(Copy, Clone)]
@@ -96,18 +88,23 @@ pub enum AccFS {
     G16 = 0b01 << FS_XL_SHIFT,
 }
 
-fn acc_fs_to_numeric(fs: AccFS) -> u16 {
-    return match (fs) {
-        AccFS::G2 => 2,
-        AccFS::G4 => 4,
-        AccFS::G8 => 8,
-        AccFS::G16 => 16,
+fn acc_fs_to_numeric(fs: AccFS) -> f32 {
+    return match fs {
+        AccFS::G2 => 0.061 / 1000.0,
+        AccFS::G4 => 0.122 / 1000.0,
+        AccFS::G8 => 0.244 / 1000.0,
+        AccFS::G16 => 0.732 / 1000.0,
     };
 }
 
-fn rescale_acc(raw: i16, fs: AccFS) -> f32 {
-    return rescale(raw, acc_fs_to_numeric(fs));
-}
+// CTRL_REG8
+const CTRL_REG8_ADDR: u8 = 0x22;
+const CTRL_REG8_BYTES: usize = 1;
+const CTRL_REG8_RESET: u8 = 0b00000100;
+
+const SW_RESET_SHIFT: u8 = 0;
+const SW_RESET_MASK: u8 = 0b1 << SW_RESET_SHIFT;
+const SW_RESET: u8 = SW_RESET_MASK;
 
 const OUT_XYZXL_ADDR: u8 = 0x28;
 const OUT_XYZXL_BYTES: usize = 6;
@@ -205,14 +202,23 @@ impl Settings {
             return Err(LSMError::SensorNotFound);
         }
 
+        // Sensors are present, reset before initializing
+        write_register(self.acc_gyro_addr, CTRL_REG8_ADDR, &[SW_RESET])
+            .await
+            .unwrap();
+
         // Perform initialization
         let mut ctrl_1g = modify_bits(CTRL_1G_RESET, ODR_G_MASK, self.gyro_odr as u8);
         ctrl_1g = modify_bits(ctrl_1g, FS_G_MASK, self.gyro_fs as u8);
-        write_register(self.acc_gyro_addr, CTRL_1G_ADDR, &[ctrl_1g]).await;
+        write_register(self.acc_gyro_addr, CTRL_1G_ADDR, &[ctrl_1g])
+            .await
+            .unwrap();
 
         let mut ctrl_6xl = modify_bits(CTRL_6XL_RESET, ODR_XL_MASK, self.acc_odr as u8);
         ctrl_6xl = modify_bits(ctrl_6xl, FS_XL_MASK, self.acc_fs as u8);
-        write_register(self.acc_gyro_addr, CTRL_6XL_ADDR, &[ctrl_6xl]).await;
+        write_register(self.acc_gyro_addr, CTRL_6XL_ADDR, &[ctrl_6xl])
+            .await
+            .unwrap();
         return Ok(LSM { settings: self });
     }
 }
@@ -232,36 +238,24 @@ impl LSM {
         let mut xyz_xl = [0; OUT_XYZXL_BYTES];
         read_register(self.settings.acc_gyro_addr, OUT_XYZXL_ADDR, &mut xyz_xl).await?;
         return Ok(AccReading {
-            ax: rescale_acc(
-                ((xyz_xl[1] as i16) << 8) | (xyz_xl[0] as i16),
-                self.settings.acc_fs,
-            ),
-            ay: rescale_acc(
-                ((xyz_xl[1] as i16) << 8) | (xyz_xl[0] as i16),
-                self.settings.acc_fs,
-            ),
-            az: rescale_acc(
-                ((xyz_xl[1] as i16) << 8) | (xyz_xl[0] as i16),
-                self.settings.acc_fs,
-            ),
+            ax: i16::from_le_bytes([xyz_xl[0], xyz_xl[1]]) as f32
+                * acc_fs_to_numeric(self.settings.acc_fs),
+            ay: i16::from_le_bytes([xyz_xl[2], xyz_xl[3]]) as f32
+                * acc_fs_to_numeric(self.settings.acc_fs),
+            az: i16::from_le_bytes([xyz_xl[4], xyz_xl[5]]) as f32
+                * acc_fs_to_numeric(self.settings.acc_fs),
         });
     }
     pub async fn angular_rate(&self) -> Result<GyroReading, I2CError> {
         let mut xyz_g = [0; OUT_XYZG_BYTES];
         read_register(self.settings.acc_gyro_addr, OUT_XYZG_ADDR, &mut xyz_g).await?;
         return Ok(GyroReading {
-            gx: rescale_gyro(
-                ((xyz_g[1] as i16) << 8) | (xyz_g[0] as i16),
-                self.settings.gyro_fs,
-            ),
-            gy: rescale_gyro(
-                ((xyz_g[3] as i16) << 8) | (xyz_g[2] as i16),
-                self.settings.gyro_fs,
-            ),
-            gz: rescale_gyro(
-                ((xyz_g[5] as i16) << 8) | (xyz_g[4] as i16),
-                self.settings.gyro_fs,
-            ),
+            gx: i16::from_le_bytes([xyz_g[0], xyz_g[1]]) as f32
+                * gyro_fs_to_numeric(self.settings.gyro_fs),
+            gy: i16::from_le_bytes([xyz_g[2], xyz_g[3]]) as f32
+                * gyro_fs_to_numeric(self.settings.gyro_fs),
+            gz: i16::from_le_bytes([xyz_g[4], xyz_g[5]]) as f32
+                * gyro_fs_to_numeric(self.settings.gyro_fs),
         });
     }
 }
