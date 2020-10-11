@@ -5,5 +5,7 @@
 /.idea/
 /.vscode/
 
-# Vim tags
+# Vim
 tags
+*.lock
+*.temp
