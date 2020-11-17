@@ -14,10 +14,13 @@ use futures::TryFutureExt;
 
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
+use crate::quaternions::Quaternion;
+
 mod bmp;
 mod executor;
 mod i2c;
 mod lsm;
+mod quaternions;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -98,17 +101,33 @@ async fn test_future() {
             let acc_sample = lsm.acceleration().await.unwrap();
             let rate_sample = lsm.angular_rate().await.unwrap();
             let bmp_sample = bmp.pressure_temperature().await.unwrap();
-            rprintln!(
-                "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
-                acc_sample.ax,
-                acc_sample.ay,
-                acc_sample.az,
-                rate_sample.gx,
-                rate_sample.gy,
-                rate_sample.gz,
-                bmp_sample.press,
-                bmp_sample.temp
-            );
+
+            // Construct a quaternion rotating from the Earth
+            // frame to the measured frame.
+
+            let acc_quat = {
+                use libm::{sqrtf, powf};
+                // Because the expected gravity vector is [0 0 1] in our coordinate system
+                // The dot product of the gravity vector and the observation is the measured
+                // z value.
+                // The sensor z is inverted WRT our coordinate system.
+                let dot = acc_sample.az/sqrtf(powf(acc_sample.ax, 2.) + powf(acc_sample.ay, 2.) + powf(acc_sample.az, 2.));
+                let cos_ht = sqrtf((1. + dot) / 2.);
+                let sin_ht = sqrtf((1. - dot) / 2.);
+                Quaternion::new(cos_ht, acc_sample.ax * sin_ht, acc_sample.ay * sin_ht, acc_sample.az * sin_ht)
+            };
+            rprintln!("{:?}", acc_quat);
+            //rprintln!(
+            //    "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
+            //    acc_sample.ax,
+            //    acc_sample.ay,
+            //    acc_sample.az,
+            //    rate_sample.gx,
+            //    rate_sample.gy,
+            //    rate_sample.gz,
+            //    bmp_sample.press,
+            //    bmp_sample.temp
+            //);
         }
     }
 }

@@ -22,7 +22,7 @@ const ODR_G_SHIFT: u8 = 5;
 const ODR_G_MASK: u8 = 0b111 << ODR_G_SHIFT;
 #[repr(u8)]
 #[derive(Copy, Clone)]
-enum GyroODR {
+pub enum GyroODR {
     PowerDown = 0b000 << ODR_G_SHIFT,
     HZ14_9 = 0b001 << ODR_G_SHIFT,
     HZ59_5 = 0b010 << ODR_G_SHIFT,
@@ -67,7 +67,7 @@ const ODR_XL_SHIFT: u8 = 5;
 const ODR_XL_MASK: u8 = 0b111 << ODR_XL_SHIFT;
 #[repr(u8)]
 #[derive(Copy, Clone)]
-enum AccODR {
+pub enum AccODR {
     PowerDown = 0b000 << ODR_XL_SHIFT,
     HZ14_9 = 0b001 << ODR_XL_SHIFT,
     HZ59_5 = 0b010 << ODR_XL_SHIFT,

@@ -3,7 +3,6 @@ use core::future::Future;
 use core::ops::Add;
 use core::slice;
 use cortex_m::asm;
-use rtt_target::rprintln;
 
 fn modify_bits(orig: u8, mask: u8, new: u8) -> u8 {
     return (orig & !mask) | new;
