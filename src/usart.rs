@@ -21,19 +21,16 @@ pub enum USARTError {
 
 #[derive(Copy, Clone)]
 enum HandlerContext {
-//    MessageRead { n_bytes: u8 },
+    //    MessageRead { n_bytes: u8 },
     MessageWrite { n_bytes: u8 },
 }
 
 enum Operation<'a> {
-    MessageWrite {
-        n_bytes: u8,
-        data: &'a [u8],
-    },
-//    MessageRead {
-//        n_bytes: u8,
-//        buff: &'a mut [u8],
-//    }
+    MessageWrite { n_bytes: u8, data: &'a [u8] },
+    //    MessageRead {
+    //        n_bytes: u8,
+    //        buff: &'a mut [u8],
+    //    }
 }
 
 enum FutureState {
@@ -80,10 +77,7 @@ impl<'a> Future for USARTFuture<'a> {
                         //        Ordering::Relaxed,
                         //    );
                         //}
-                        Operation::MessageWrite {
-                            n_bytes,
-                            data,
-                        } => {
+                        Operation::MessageWrite { n_bytes, data } => {
                             // If we are writing, the data to be written needs to be moved into the handler's buffer.
                             if *n_bytes <= unsafe { BUFFER.len() as u8 } {
                                 for i in 0..*n_bytes as usize {
@@ -94,9 +88,7 @@ impl<'a> Future for USARTFuture<'a> {
                                 return Poll::Ready(Err(USARTError::TooManyBytes));
                             }
                             HANDLER_CONTEXT.store(
-                                Some(HandlerContext::MessageWrite {
-                                    n_bytes: *n_bytes,
-                                }),
+                                Some(HandlerContext::MessageWrite { n_bytes: *n_bytes }),
                                 Ordering::Relaxed,
                             );
                         }
@@ -143,7 +135,7 @@ static mut BUFFER: [u8; MAX_ALLOWABLE_BYTES] = [0; MAX_ALLOWABLE_BYTES];
 enum HandlerState {
     Init,
     WritingBytes,
-//    ReadingBytes,
+    //    ReadingBytes,
     Stopped,
 }
 
@@ -161,57 +153,61 @@ fn USART2_EXTI26() {
     };
 
     match op {
-//        HandlerContext::MessageRead { n_bytes } => match *HANDLER_STATE {
-//            HandlerState::Init => {
-//                *N_BYTES = 0;
-//                USART2.brr.write(|w| w.brr().);
-//                USART2.cr2.write(|w| w.stop().stop1());
-//                USART2.cr1.write(|w| w.m().bit8().txeie().enabled().te().enabled());
-//                *HANDLER_STATE = HandlerState::ReadRegAddressed;
-//            }
-//            HandlerState::WritingBytes => {
-//                panic!("WritingBytes reached but not writing");
-//            }
-//            HandlerState::ReadingBytes => {
-//                unsafe { BUFFER[*N_BYTES as usize] = I2C1.rxdr.read().rxdata().bits() };
-//                *N_BYTES += 1;
-//                if *N_BYTES == n_bytes {
-//                    *HANDLER_STATE = HandlerState::Stopped;
-//                }
-//            }
-//            HandlerState::Stopped => {
-//                I2C1.icr.write(|w| w.stopcf().clear());
-//                HANDLER_CONTEXT.store(None, Ordering::Relaxed);
-//                TRANSACTION_COMPLETE.store(true, Ordering::Relaxed);
-//                executor::force_wakeup();
-//                *HANDLER_STATE = HandlerState::Init;
-//            }
-//        },
+        //        HandlerContext::MessageRead { n_bytes } => match *HANDLER_STATE {
+        //            HandlerState::Init => {
+        //                *N_BYTES = 0;
+        //                USART2.brr.write(|w| w.brr().);
+        //                USART2.cr2.write(|w| w.stop().stop1());
+        //                USART2.cr1.write(|w| w.m().bit8().txeie().enabled().te().enabled());
+        //                *HANDLER_STATE = HandlerState::ReadRegAddressed;
+        //            }
+        //            HandlerState::WritingBytes => {
+        //                panic!("WritingBytes reached but not writing");
+        //            }
+        //            HandlerState::ReadingBytes => {
+        //                unsafe { BUFFER[*N_BYTES as usize] = I2C1.rxdr.read().rxdata().bits() };
+        //                *N_BYTES += 1;
+        //                if *N_BYTES == n_bytes {
+        //                    *HANDLER_STATE = HandlerState::Stopped;
+        //                }
+        //            }
+        //            HandlerState::Stopped => {
+        //                I2C1.icr.write(|w| w.stopcf().clear());
+        //                HANDLER_CONTEXT.store(None, Ordering::Relaxed);
+        //                TRANSACTION_COMPLETE.store(true, Ordering::Relaxed);
+        //                executor::force_wakeup();
+        //                *HANDLER_STATE = HandlerState::Init;
+        //            }
+        //        },
         HandlerContext::MessageWrite { n_bytes } => match *HANDLER_STATE {
             HandlerState::Init => {
                 *N_BYTES = 0;
-                USART2.cr1.modify(|_, w|w.txeie().enabled());
-                USART2.tdr.write(|w| unsafe { w.tdr().bits(BUFFER[*N_BYTES as usize] as u16)});
+                USART2.cr1.modify(|_, w| w.txeie().enabled());
+                USART2
+                    .tdr
+                    .write(|w| unsafe { w.tdr().bits(BUFFER[*N_BYTES as usize] as u16) });
                 *N_BYTES += 1;
                 if *N_BYTES == n_bytes {
                     *HANDLER_STATE = HandlerState::Stopped;
                 }
                 *HANDLER_STATE = HandlerState::WritingBytes;
             }
-//            HandlerState::ReadRegAddressed => panic!("ReadRegAddressed reached but not reading"),
+            //            HandlerState::ReadRegAddressed => panic!("ReadRegAddressed reached but not reading"),
             HandlerState::WritingBytes => {
-                USART2.tdr.write(|w| unsafe { w.tdr().bits(BUFFER[*N_BYTES as usize] as u16)});
+                USART2
+                    .tdr
+                    .write(|w| unsafe { w.tdr().bits(BUFFER[*N_BYTES as usize] as u16) });
                 *N_BYTES += 1;
                 if *N_BYTES == n_bytes {
                     *HANDLER_STATE = HandlerState::Stopped;
                 }
             }
-//            HandlerState::ReadingBytes => panic!("ReadingBytes reached but not reading"),
+            //            HandlerState::ReadingBytes => panic!("ReadingBytes reached but not reading"),
             HandlerState::Stopped => {
                 // NOTE: Does not ensure last bit was actually sent
                 // if in future this will shutdown the peripheral (for power saving, for example)
                 // ensure TC before TE disable
-                USART2.cr1.modify(|_ , w| w.txeie().disabled());
+                USART2.cr1.modify(|_, w| w.txeie().disabled());
                 HANDLER_CONTEXT.store(None, Ordering::Relaxed);
                 TRANSACTION_COMPLETE.store(true, Ordering::Relaxed);
                 executor::force_wakeup();
@@ -224,14 +220,16 @@ fn USART2_EXTI26() {
 pub fn init(USART2: USART2) {
     USART2.brr.write(|w| w.brr().bits(625));
     USART2.cr2.write(|w| w.stop().stop1());
-    USART2.cr1.write(|w| w.m()
-        .bit8()
-        .over8()
-        .oversampling16()
-        .te()
-        .set_bit()
-        .ue()
-        .enabled());
+    USART2.cr1.write(|w| {
+        w.m()
+            .bit8()
+            .over8()
+            .oversampling16()
+            .te()
+            .set_bit()
+            .ue()
+            .enabled()
+    });
     unsafe { NVIC::unmask(Interrupt::USART2_EXTI26) }
 }
 
@@ -257,6 +255,6 @@ pub async fn write_message(data: &[u8]) -> Result<(), USARTError> {
             n_bytes: data.len() as u8,
             data,
         })
-            .await;
+        .await;
     }
 }
