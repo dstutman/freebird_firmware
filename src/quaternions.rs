@@ -1,12 +1,12 @@
 use core::ops::{Mul, Add, Sub};
-use libm::powf;
+use libm::{powf, sqrtf};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Quaternion {
-    a: f32,
-    b: f32,
-    c: f32,
-    d: f32
+    pub a: f32,
+    pub b: f32,
+    pub c: f32,
+    pub d: f32
 }
 
 impl Quaternion {
@@ -15,7 +15,7 @@ impl Quaternion {
     }
 
     pub fn norm(&self) -> f32 {
-        return powf(self.a, 2.) + powf(self.b, 2.) + powf(self.c, 2.) + powf(self.d, 2.);
+        return sqrtf(powf(self.a, 2.) + powf(self.b, 2.) + powf(self.c, 2.) + powf(self.d, 2.));
     }
 
     pub fn conj(&self) -> Self {
@@ -34,6 +34,15 @@ impl Quaternion {
             b: self.b / norm,
             c: self.c / norm,
             d: self.d / norm
+        }
+    }
+
+    pub fn scale(&self, factor: f32) -> Self {
+        return Quaternion {
+            a: self.a * factor,
+            b: self.b * factor,
+            c: self.c * factor,
+            d: self.d * factor
         }
     }
 }

@@ -146,7 +146,8 @@ impl<'a> Future for I2CFuture<'a> {
 static HANDLER_IN_USE: AtomicBool = AtomicBool::new(false);
 static HANDLER_CONTEXT: Atomic<Option<HandlerContext>> = Atomic::new(None);
 static TRANSACTION_COMPLETE: AtomicBool = AtomicBool::new(false);
-static mut BUFFER: [u8; 32] = [0; 32];
+const MAX_ALLOWABLE_BYTES: usize = 32;
+static mut BUFFER: [u8; MAX_ALLOWABLE_BYTES] = [0; MAX_ALLOWABLE_BYTES];
 
 enum HandlerState {
     Init,
@@ -250,6 +251,9 @@ fn I2C1_EV_EXTI23() {
             }
             HandlerState::ReadingBytes => panic!("ReadingBytes reached but not reading"),
             HandlerState::Stopped => {
+                // NOTE: Does not ensure last bit was actually sent
+                // if in future this will shutdown the peripheral (for power saving, for example)
+                // ensure TC before disable
                 I2C1.icr.write(|w| w.stopcf().clear());
                 HANDLER_CONTEXT.store(None, Ordering::Relaxed);
                 TRANSACTION_COMPLETE.store(true, Ordering::Relaxed);
@@ -280,7 +284,7 @@ pub fn init(I2C1: I2C1) {
 }
 
 pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), I2CError> {
-    if buff.len() > 255 {
+    if buff.len() > MAX_ALLOWABLE_BYTES {
         return Err(I2CError::TooManyBytes);
     } else {
         return I2CFuture::new(Operation::RegisterRead {
@@ -294,7 +298,7 @@ pub async fn read_register(addr: u8, reg: u8, buff: &mut [u8]) -> Result<(), I2C
 }
 
 pub async fn write_register(addr: u8, reg: u8, data: &[u8]) -> Result<(), I2CError> {
-    if data.len() > 255 {
+    if data.len() > MAX_ALLOWABLE_BYTES {
         return Err(I2CError::TooManyBytes);
     } else {
         return I2CFuture::new(Operation::RegisterWrite {
