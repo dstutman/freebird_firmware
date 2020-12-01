@@ -3,46 +3,46 @@ use libm::{powf, sqrtf};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Quaternion {
-    pub a: f32,
-    pub b: f32,
-    pub c: f32,
-    pub d: f32,
+    pub w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 impl Quaternion {
-    pub(crate) fn new(a: f32, b: f32, c: f32, d: f32) -> Self {
-        return Quaternion { a, b, c, d };
+    pub(crate) fn new(w: f32, x: f32, y: f32, z: f32) -> Self {
+        return Quaternion { w, x, y, z };
     }
 
     pub fn norm(&self) -> f32 {
-        return sqrtf(powf(self.a, 2.) + powf(self.b, 2.) + powf(self.c, 2.) + powf(self.d, 2.));
+        return sqrtf(powf(self.w, 2.) + powf(self.x, 2.) + powf(self.y, 2.) + powf(self.z, 2.));
     }
 
     pub fn conj(&self) -> Self {
         return Quaternion {
-            a: self.a,
-            b: -self.b,
-            c: -self.c,
-            d: -self.d,
+            w: self.w,
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
         };
     }
 
     pub fn normalized(&self) -> Self {
         let norm = self.norm();
         return Quaternion {
-            a: self.a / norm,
-            b: self.b / norm,
-            c: self.c / norm,
-            d: self.d / norm,
+            w: self.w / norm,
+            x: self.x / norm,
+            y: self.y / norm,
+            z: self.z / norm,
         };
     }
 
     pub fn scale(&self, factor: f32) -> Self {
         return Quaternion {
-            a: self.a * factor,
-            b: self.b * factor,
-            c: self.c * factor,
-            d: self.d * factor,
+            w: self.w * factor,
+            x: self.x * factor,
+            y: self.y * factor,
+            z: self.z * factor,
         };
     }
 }
@@ -52,10 +52,10 @@ impl Mul for Quaternion {
 
     fn mul(self, rhs: Self) -> Self {
         return Quaternion {
-            a: self.a * rhs.a - self.b * rhs.b - self.c * rhs.c - self.d * rhs.d,
-            b: self.a * rhs.b + self.b * rhs.a + self.c * rhs.d - self.d * rhs.c,
-            c: self.a * rhs.c - self.b * rhs.d + self.c * rhs.a + self.d * rhs.b,
-            d: self.a * rhs.d + self.b * rhs.c - self.c * rhs.b + self.d * rhs.a,
+            w: self.w * rhs.w - self.x * rhs.x - self.y * rhs.y - self.z * rhs.z,
+            x: self.w * rhs.x + self.x * rhs.w + self.y * rhs.z - self.z * rhs.y,
+            y: self.w * rhs.y - self.x * rhs.z + self.y * rhs.w + self.z * rhs.x,
+            z: self.w * rhs.z + self.x * rhs.y - self.y * rhs.x + self.z * rhs.w,
         };
     }
 }
@@ -65,10 +65,10 @@ impl Add for Quaternion {
 
     fn add(self, rhs: Self) -> Self {
         return Quaternion {
-            a: self.a + rhs.a,
-            b: self.b + rhs.b,
-            c: self.c + rhs.c,
-            d: self.d + rhs.d,
+            w: self.w + rhs.w,
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z,
         };
     }
 }
@@ -78,10 +78,10 @@ impl Sub for Quaternion {
 
     fn sub(self, rhs: Self) -> Self {
         return Quaternion {
-            a: self.a - rhs.a,
-            b: self.b - rhs.b,
-            c: self.c - rhs.c,
-            d: self.d - rhs.d,
+            w: self.w - rhs.w,
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            z: self.z - rhs.z,
         };
     }
 }

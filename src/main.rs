@@ -23,6 +23,7 @@ mod i2c;
 mod lsm;
 mod quaternions;
 mod usart;
+mod ukf;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -204,10 +205,10 @@ async fn test_future() {
             write!(
                 Wrapper::new(&mut msg),
                 "w{}wa{}ab{}bc{}c\r\n",
-                last_quat.a,
-                last_quat.b,
-                last_quat.c,
-                last_quat.d
+                last_quat.w,
+                last_quat.x,
+                last_quat.y,
+                last_quat.z
             )
             .unwrap();
             usart::write_message(&msg).await.unwrap();
