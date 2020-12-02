@@ -7,12 +7,13 @@ use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::{self, asm};
 use cortex_m_rt::{entry, exception};
 use futures::future::join;
+use nalgebra::{Matrix6, Vector3};
 use stm32f3::stm32f303;
+use ukf::Matrix9;
 
 use crate::executor::Executor;
 use futures::TryFutureExt;
 
-use crate::quaternions::Quaternion;
 use core::fmt::write;
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
@@ -21,9 +22,8 @@ mod bmp;
 mod executor;
 mod i2c;
 mod lsm;
-mod quaternions;
-mod usart;
 mod ukf;
+mod usart;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -160,55 +160,95 @@ async fn test_future() {
     let lsm = lsm::Settings::default().init().await.unwrap();
     let bmp = bmp::Settings::default().init().await.unwrap();
     let mut last_ticks = 0;
-    let mut last_quat = Quaternion::new(1., 0., 0., 0.);
+    //let mut last_quat = Quaternion::new(1., 0., 0., 0.);
+    let mut gbx = 0.0;
+    let mut gby = 0.0;
+    let mut gbz = 0.0;
+    let mut n = 0;
+    while n < 1000 {
+        n += 1;
+        let gyro_sample = lsm.angular_rate().await.unwrap();
+        gbx += gyro_sample.gx;
+        gby += gyro_sample.gy;
+        gbz += -gyro_sample.gz;
+    }
+    gbx /= n as f32;
+    gby /= n as f32;
+    gbz /= n as f32;
+
     loop {
         if get_ticks() - last_ticks > 20 {
             let acc_sample = lsm.acceleration().await.unwrap();
             let rate_sample = lsm.angular_rate().await.unwrap();
             let bmp_sample = bmp.pressure_temperature().await.unwrap();
+            let mut filter = ukf::UKF::new();
+            let predict = filter.predict(
+                Matrix6::<f32>::new(
+                    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                    0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.,
+                ),
+                //Matrix6::<f32>::identity(),
+                (get_ticks() - last_ticks) as f32 / 1000.0,
+            );
+            let ab = Vector3::<f32>::new(acc_sample.ax, acc_sample.ay, acc_sample.az).normalize();
+            let fake_mag = predict.pose.transform_vector(&Vector3::new(1.0, 0.0, 0.0));
 
-            // Construct a quaternion rotating from the Earth
-            // frame to the measured frame.
-            let gyro_quat = {
-                let dt: f32 = (get_ticks() - last_ticks) as f32 / 1000.;
-                Quaternion::new(
-                    1.,
-                    rate_sample.gx / 180. * PI * dt / 2.,
-                    rate_sample.gy / 180. * PI * dt / 2.,
-                    -rate_sample.gz / 180. * PI * dt / 2.,
-                )
-                .normalized()
-                    * last_quat
-            };
-            let acc_quat = {
-                use libm::{powf, sqrtf};
-                // Because the expected gravity vector is [0 0 1] in our coordinate system
-                // The dot product of the gravity vector and the observation is the measured
-                // z value.
-                // The sensor z is inverted WRT our coordinate system.
-                let dot = acc_sample.az
-                    / sqrtf(
-                        powf(acc_sample.ax, 2.) + powf(acc_sample.ay, 2.) + powf(acc_sample.az, 2.),
-                    );
-                let cos_ht = sqrtf((1. + dot) / 2.);
-                let sin_ht = sqrtf((1. - dot) / 2.);
-                Quaternion::new(
-                    cos_ht,
-                    acc_sample.ax * sin_ht,
-                    acc_sample.ay * sin_ht,
-                    acc_sample.az * sin_ht,
-                )
-            };
-            last_quat = (acc_quat.scale(0.05) + gyro_quat.scale(0.95)).normalized();
+            let pred = filter.update(
+                ukf::Observation::new(
+                    ab[0],
+                    ab[1],
+                    -ab[2],
+                    (rate_sample.gx - gbx) * PI / 180.0,
+                    (rate_sample.gy - gby) * PI / 180.0,
+                    (-rate_sample.gz - gbz) * PI / 180.0,
+                    fake_mag.x,
+                    fake_mag.y,
+                    fake_mag.z,
+                ),
+                Matrix9::<f32>::identity() * 0.05,
+            );
+            //// Construct a quaternion rotating from the Earth
+            //// frame to the measured frame.
+            //let gyro_quat = {
+            //    let dt: f32 = (get_ticks() - last_ticks) as f32 / 1000.;
+            //    Quaternion::new(
+            //        1.,
+            //        rate_sample.gx / 180. * PI * dt / 2.,
+            //        rate_sample.gy / 180. * PI * dt / 2.,
+            //        -rate_sample.gz / 180. * PI * dt / 2.,
+            //    )
+            //    .normalized()
+            //        * last_quat
+            //};
+            //let acc_quat = {
+            //    use libm::{powf, sqrtf};
+            //    // Because the expected gravity vector is [0 0 1] in our coordinate system
+            //    // The dot product of the gravity vector and the observation is the measured
+            //    // z value.
+            //    // The sensor z is inverted WRT our coordinate system.
+            //    let dot = acc_sample.az
+            //        / sqrtf(
+            //            powf(acc_sample.ax, 2.) + powf(acc_sample.ay, 2.) + powf(acc_sample.az, 2.),
+            //        );
+            //    let cos_ht = sqrtf((1. + dot) / 2.);
+            //    let sin_ht = sqrtf((1. - dot) / 2.);
+            //    Quaternion::new(
+            //        cos_ht,
+            //        acc_sample.ax * sin_ht,
+            //        acc_sample.ay * sin_ht,
+            //        acc_sample.az * sin_ht,
+            //    )
+            //};
+            //last_quat = (acc_quat.scale(0.05) + gyro_quat.scale(0.95)).normalized();
             let mut msg = [0 as u8; 70];
-            rprintln!("{:?}", last_quat);
+            //rprintln!("{:?}", last_quat);
             write!(
                 Wrapper::new(&mut msg),
                 "w{}wa{}ab{}bc{}c\r\n",
-                last_quat.w,
-                last_quat.x,
-                last_quat.y,
-                last_quat.z
+                pred.pose.scalar(),
+                pred.pose.vector()[0],
+                pred.pose.vector()[1],
+                pred.pose.vector()[2]
             )
             .unwrap();
             usart::write_message(&msg).await.unwrap();
