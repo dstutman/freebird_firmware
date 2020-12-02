@@ -13,12 +13,13 @@ pub type Matrix6x9<N> = Matrix<N, U6, U9, Owned<N, U6, U9>>;
 //        let mut vec: Vector9<T> = Default::default();
 //        vec[0] = m1;
 //        vec[1] = m2;
-//        vec[3] = m3;
-//        vec[4] = m4;
-//        vec[5] = m5;
-//        vec[6] = m6;
-//        vec[7] = m7;
-//        vec[8] = m8;
+//        vec[2] = m3;
+//        vec[3] = m4;
+//        vec[4] = m5;
+//        vec[5] = m6;
+//        vec[6] = m7;
+//        vec[7] = m8;
+//        vec[8] = m9;
 //        return vec;
 //}
 pub fn new_vector9(
@@ -35,12 +36,13 @@ pub fn new_vector9(
     let mut vec: Vector9<f32> = Default::default();
     vec[0] = m1;
     vec[1] = m2;
-    vec[3] = m3;
-    vec[4] = m4;
-    vec[5] = m5;
-    vec[6] = m6;
-    vec[7] = m7;
-    vec[8] = m8;
+    vec[2] = m3;
+    vec[3] = m4;
+    vec[4] = m5;
+    vec[5] = m6;
+    vec[6] = m7;
+    vec[7] = m8;
+    vec[8] = m9;
     return vec;
 }
 
@@ -117,15 +119,15 @@ impl From<Observation> for Vector9<f32> {
 impl From<Vector9<f32>> for Observation {
     fn from(vec: Vector9<f32>) -> Self {
         return Observation {
-            ax: vec[(0, 0)],
-            ay: vec[(1, 0)],
-            az: vec[(2, 0)],
-            gx: vec[(3, 0)],
-            gy: vec[(4, 0)],
-            gz: vec[(5, 0)],
-            mx: vec[(6, 0)],
-            my: vec[(7, 0)],
-            mz: vec[(8, 0)],
+            ax: vec[0],
+            ay: vec[1],
+            az: vec[2],
+            gx: vec[3],
+            gy: vec[4],
+            gz: vec[5],
+            mx: vec[6],
+            my: vec[7],
+            mz: vec[8],
         };
     }
 }
@@ -153,6 +155,7 @@ fn H(x: State) -> Observation {
     // The Earth frame magnetic field vector
     let mag_earth = Vector3::<f32>::new(1.0, 0.0, 0.0);
     let mag_body = x.pose.transform_vector(&mag_earth);
+
     return Observation {
         ax: grav_body.x,
         ay: grav_body.y,
@@ -228,8 +231,8 @@ pub struct UKF {
     current_estimate: State,
     variance: Matrix6<f32>,
 
-    sigma_predictions: [State; 2 * N],
-    prediction_deviations: [SigmaDeviation; 2 * N],
+    sigma_predictions: [State; 2 * (N - 1)],
+    prediction_deviations: [SigmaDeviation; 2 * (N - 1)],
 }
 
 impl UKF {
@@ -275,7 +278,7 @@ impl UKF {
         }
 
         // Map the sigma states into the prediction space
-        let mut sigma_predictions: [State; 2 * N] = Default::default();
+        let mut sigma_predictions: [State; 2 * (N - 1)] = Default::default();
         for (i, &state) in sigma_states.iter().enumerate() {
             sigma_predictions[i] = F(state, dt);
         }
@@ -284,11 +287,11 @@ impl UKF {
         let predicted_state = {
             // FIXME: Check the runtime for this mean_of, might be slow iterative
             let estimated_pose = UnitQuaternion::mean_of(sigma_predictions.iter().map(|y| y.pose));
-            let mut wx = sigma_predictions.iter().map(|y| y.wx).sum::<f32>()
+            let wx = sigma_predictions.iter().map(|y| y.wx).sum::<f32>()
                 / (sigma_predictions.len() as f32);
-            let mut wy = sigma_predictions.iter().map(|y| y.wy).sum::<f32>()
+            let wy = sigma_predictions.iter().map(|y| y.wy).sum::<f32>()
                 / (sigma_predictions.len() as f32);
-            let mut wz = sigma_predictions.iter().map(|y| y.wz).sum::<f32>()
+            let wz = sigma_predictions.iter().map(|y| y.wz).sum::<f32>()
                 / (sigma_predictions.len() as f32);
 
             State {
@@ -299,7 +302,7 @@ impl UKF {
             }
         };
 
-        let mut prediction_deviations: [SigmaDeviation; 2 * N] = Default::default();
+        let mut prediction_deviations: [SigmaDeviation; 2 * (N - 1)] = Default::default();
         for (i, &state) in sigma_predictions.iter().enumerate() {
             prediction_deviations[i] = determine_deviation(state, predicted_state);
         }

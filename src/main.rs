@@ -161,17 +161,30 @@ async fn test_future() {
     let bmp = bmp::Settings::default().init().await.unwrap();
     let mut last_ticks = 0;
     //let mut last_quat = Quaternion::new(1., 0., 0., 0.);
+    let mut abx = 0.0;
+    let mut aby = 0.0;
+    let mut abz = 0.0;
     let mut gbx = 0.0;
     let mut gby = 0.0;
     let mut gbz = 0.0;
     let mut n = 0;
     while n < 1000 {
         n += 1;
+        let acc_sample = lsm.acceleration().await.unwrap();
+        abx += acc_sample.ax;
+        aby += acc_sample.ay;
+        abz += acc_sample.az;
         let gyro_sample = lsm.angular_rate().await.unwrap();
         gbx += gyro_sample.gx;
         gby += gyro_sample.gy;
-        gbz += -gyro_sample.gz;
+        gbz += gyro_sample.gz;
     }
+    abx /= n as f32;
+    aby /= n as f32;
+    abz /= n as f32;
+    
+    abz -= 1.0;
+
     gbx /= n as f32;
     gby /= n as f32;
     gbz /= n as f32;
@@ -182,30 +195,31 @@ async fn test_future() {
             let rate_sample = lsm.angular_rate().await.unwrap();
             let bmp_sample = bmp.pressure_temperature().await.unwrap();
             let mut filter = ukf::UKF::new();
-            let predict = filter.predict(
-                Matrix6::<f32>::new(
-                    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-                    0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.,
-                ),
-                //Matrix6::<f32>::identity(),
+            let prediction = filter.predict(
+                //Matrix6::<f32>::new(
+                //    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                //    0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.,
+                //),
+                Matrix6::<f32>::identity(),
                 (get_ticks() - last_ticks) as f32 / 1000.0,
             );
-            let ab = Vector3::<f32>::new(acc_sample.ax, acc_sample.ay, acc_sample.az).normalize();
-            let fake_mag = predict.pose.transform_vector(&Vector3::new(1.0, 0.0, 0.0));
+
+            let ab = Vector3::<f32>::new(acc_sample.ax - abx, acc_sample.ay - aby, acc_sample.az - abz).normalize();
+            let fake_mag = prediction.pose.transform_vector(&Vector3::new(1.0, 0.0, 0.0));
 
             let pred = filter.update(
                 ukf::Observation::new(
-                    ab[0],
-                    ab[1],
-                    -ab[2],
+                    ab.x,
+                    ab.y,
+                    -ab.z,
                     (rate_sample.gx - gbx) * PI / 180.0,
                     (rate_sample.gy - gby) * PI / 180.0,
-                    (-rate_sample.gz - gbz) * PI / 180.0,
+                    -(rate_sample.gz - gbz) * PI / 180.0,
                     fake_mag.x,
                     fake_mag.y,
                     fake_mag.z,
                 ),
-                Matrix9::<f32>::identity() * 0.05,
+                Matrix9::<f32>::identity() * 0.01,
             );
             //// Construct a quaternion rotating from the Earth
             //// frame to the measured frame.
