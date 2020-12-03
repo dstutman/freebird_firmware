@@ -1,5 +1,5 @@
 use libm::sqrtf;
-use nalgebra::storage::Owned;
+use nalgebra::{storage::Owned, Unit};
 use nalgebra::{
     Matrix, Matrix6, Quaternion, Scalar, UnitQuaternion, Vector, Vector3, Vector6, U1, U6, U9,
 };
@@ -146,10 +146,8 @@ impl From<Vector9<f32>> for Observation {
 //}
 
 fn H(x: State) -> Observation {
-    // The Earth frame gravity vector represented as a quaternion
+    // The Earth frame gravity vector
     let grav_earth = Vector3::<f32>::new(0.0, 0.0, 1.0);
-
-    // Translated to the body frame
     let grav_body = x.pose.transform_vector(&grav_earth);
 
     // The Earth frame magnetic field vector
@@ -184,14 +182,14 @@ struct SigmaDeviation {
 // TODO: For some reason, implementing this from does not
 // implement into.
 impl From<Vector6<f32>> for SigmaDeviation {
-    fn from(vect: Vector6<f32>) -> Self {
+    fn from(vec: Vector6<f32>) -> Self {
         return SigmaDeviation {
-            rx: vect[0],
-            ry: vect[1],
-            rz: vect[2],
-            wx: vect[3],
-            wy: vect[4],
-            wz: vect[5],
+            rx: vec[0],
+            ry: vec[1],
+            rz: vec[2],
+            wx: vec[3],
+            wy: vec[4],
+            wz: vec[5],
         };
     }
 }
@@ -225,14 +223,14 @@ fn determine_deviation(x: State, x_mean: State) -> SigmaDeviation {
     };
 }
 
-// The dimensionality of the state vector
-const N: usize = 7;
+// The dimensionality of the variance
+const N: usize = 6;
 pub struct UKF {
     current_estimate: State,
     variance: Matrix6<f32>,
 
-    sigma_predictions: [State; 2 * (N - 1)],
-    prediction_deviations: [SigmaDeviation; 2 * (N - 1)],
+    sigma_predictions: [State; 2 * N],
+    prediction_deviations: [SigmaDeviation; 2 * N],
 }
 
 impl UKF {
@@ -252,19 +250,11 @@ impl UKF {
 
     pub fn predict(&mut self, Q: Matrix6<f32>, dt: f32) -> State {
         // Create the relative sigma deviations
-        let sigma_deviations = sqrtf((N - 1) as f32) * self.variance.cholesky().unwrap().l();
-        let mut sigma_states: [State; (N - 1) * 2] = Default::default();
+        let sigma_deviations = sqrtf(2.0*N as f32) * self.variance.cholesky().unwrap().l();
+        let mut sigma_states: [State; N * 2] = Default::default();
 
         // Construct the absolute sigma states
-        for i in 0..(N - 1) {
-            let positive_deviation = SigmaDeviation {
-                rx: sigma_deviations[(0, i)],
-                ry: sigma_deviations[(1, i)],
-                rz: sigma_deviations[(2, i)],
-                wx: sigma_deviations[(3, i)],
-                wy: sigma_deviations[(4, i)],
-                wz: sigma_deviations[(5, i)],
-            };
+        for i in 0..N {
             let negative_deviation = SigmaDeviation {
                 rx: -sigma_deviations[(0, i)],
                 ry: -sigma_deviations[(1, i)],
@@ -273,12 +263,20 @@ impl UKF {
                 wy: -sigma_deviations[(4, i)],
                 wz: -sigma_deviations[(5, i)],
             };
+            let positive_deviation = SigmaDeviation {
+                rx: sigma_deviations[(0, i)],
+                ry: sigma_deviations[(1, i)],
+                rz: sigma_deviations[(2, i)],
+                wx: sigma_deviations[(3, i)],
+                wy: sigma_deviations[(4, i)],
+                wz: sigma_deviations[(5, i)],
+            };
             sigma_states[i] = apply_deviation(negative_deviation, self.current_estimate);
-            sigma_states[(N - 1) + i] = apply_deviation(positive_deviation, self.current_estimate);
+            sigma_states[N + i] = apply_deviation(positive_deviation, self.current_estimate);
         }
 
         // Map the sigma states into the prediction space
-        let mut sigma_predictions: [State; 2 * (N - 1)] = Default::default();
+        let mut sigma_predictions: [State; 2 * N] = Default::default();
         for (i, &state) in sigma_states.iter().enumerate() {
             sigma_predictions[i] = F(state, dt);
         }
@@ -286,6 +284,7 @@ impl UKF {
         // Calculate the apriori mean and covariance
         let predicted_state = {
             // FIXME: Check the runtime for this mean_of, might be slow iterative
+            // TODO: Possible error source
             let estimated_pose = UnitQuaternion::mean_of(sigma_predictions.iter().map(|y| y.pose));
             let wx = sigma_predictions.iter().map(|y| y.wx).sum::<f32>()
                 / (sigma_predictions.len() as f32);
@@ -302,7 +301,7 @@ impl UKF {
             }
         };
 
-        let mut prediction_deviations: [SigmaDeviation; 2 * (N - 1)] = Default::default();
+        let mut prediction_deviations: [SigmaDeviation; 2 * N] = Default::default();
         for (i, &state) in sigma_predictions.iter().enumerate() {
             prediction_deviations[i] = determine_deviation(state, predicted_state);
         }
@@ -315,7 +314,7 @@ impl UKF {
                 tmp_variance += sigma_mat * sigma_mat.transpose();
             }
             tmp_variance /= prediction_deviations.len() as f32;
-            tmp_variance += Q;
+            tmp_variance += Q * dt;
 
             tmp_variance
         };

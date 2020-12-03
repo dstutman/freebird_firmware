@@ -1,3 +1,4 @@
+#![feature(const_generics)]
 #![no_std]
 #![no_main]
 
@@ -21,6 +22,7 @@ use rtt_target::{rprintln, rtt_init_print};
 mod bmp;
 mod executor;
 mod i2c;
+mod linalg;
 mod lsm;
 mod ukf;
 mod usart;
@@ -182,7 +184,7 @@ async fn test_future() {
     abx /= n as f32;
     aby /= n as f32;
     abz /= n as f32;
-    
+
     abz -= 1.0;
 
     gbx /= n as f32;
@@ -204,17 +206,24 @@ async fn test_future() {
                 (get_ticks() - last_ticks) as f32 / 1000.0,
             );
 
-            let ab = Vector3::<f32>::new(acc_sample.ax - abx, acc_sample.ay - aby, acc_sample.az - abz).normalize();
-            let fake_mag = prediction.pose.transform_vector(&Vector3::new(1.0, 0.0, 0.0));
+            let ab = Vector3::<f32>::new(
+                acc_sample.ax - abx,
+                acc_sample.ay - aby,
+                acc_sample.az - abz,
+            )
+            .normalize();
+            let fake_mag = prediction
+                .pose
+                .transform_vector(&Vector3::new(-1.0, 0.0, 0.0));
 
             let pred = filter.update(
                 ukf::Observation::new(
                     ab.x,
                     ab.y,
-                    -ab.z,
+                    ab.z,
                     (rate_sample.gx - gbx) * PI / 180.0,
                     (rate_sample.gy - gby) * PI / 180.0,
-                    -(rate_sample.gz - gbz) * PI / 180.0,
+                    (rate_sample.gz - gbz) * PI / 180.0,
                     fake_mag.x,
                     fake_mag.y,
                     fake_mag.z,
@@ -266,17 +275,17 @@ async fn test_future() {
             )
             .unwrap();
             usart::write_message(&msg).await.unwrap();
-            //rprintln!(
-            //    "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
-            //    acc_sample.ax,
-            //    acc_sample.ay,
-            //    acc_sample.az,
-            //    rate_sample.gx,
-            //    rate_sample.gy,
-            //    rate_sample.gz,
-            //    bmp_sample.press,
-            //    bmp_sample.temp
-            //);
+            rprintln!(
+                "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
+                acc_sample.ax - abx,
+                acc_sample.ay - aby,
+                acc_sample.az - abz,
+                rate_sample.gx - gbx,
+                rate_sample.gy - gby,
+                rate_sample.gz - gbz,
+                bmp_sample.press,
+                bmp_sample.temp
+            );
             last_ticks = get_ticks();
         }
     }
