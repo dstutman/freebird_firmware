@@ -66,3 +66,21 @@ where
         return mat;
     }
 }
+
+impl<T, const R: usize, const C: usize> Mul<T> for Matrix<T, R, C>
+where
+    T: Add<Output = T> + Mul<Output = T> + Copy + Default,
+{
+    type Output = Matrix<T, R, C>;
+    fn mul(self, rhs: T) -> Self::Output {
+        let mut mat: Self::Output = Default::default();
+
+        for i in 0..R {
+            for j in 0..C {
+                mat[(i, j)] = self[(i, j)] * rhs;
+            }
+        }
+
+        return mat;
+    }
+}
