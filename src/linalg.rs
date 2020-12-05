@@ -1,8 +1,58 @@
 use core::ops::{Add, Index, IndexMut, Mul};
 
+use libm::{powf, sqrtf};
+
 #[derive(Debug, Copy, Clone)]
 struct Matrix<T, const R: usize, const C: usize> {
     data: [[T; R]; C],
+}
+
+impl<T: Copy + Default, const R: usize, const C: usize> Matrix<T, R, C> {
+    pub fn transpose(self) -> Matrix<T, C, R> {
+        let mut mat: Matrix<T, C, R> = Default::default();
+
+        for i in 0..R {
+            for j in 0..C {
+                mat[(j, i)] = self[(i, j)];
+            }
+        }
+
+        return mat;
+    }
+}
+
+impl<const N: usize> Matrix<f32, N, N> {
+    // Return the lower choleksy factorization
+    pub fn cholesky(self) -> Self {
+        let mut mat: Self = Default::default();
+
+        for i in 0..N {
+            for j in 0..i {
+                let mut tmp = self[(i, j)];
+
+                mat[(i, j)] = if i == j {
+                    // We are on a diagonal,
+                    // subtract square of each
+                    // preceeding Ljk in row
+                    for k in 0..j {
+                        tmp -= powf(mat[(j, k)], 2.0);
+                    }
+
+                    sqrtf(tmp)
+                } else {
+                    // We are off the diagonal
+                    // subtract all preceeding products
+                    for k in 0..j {
+                        tmp -= mat[(i, k)] * mat[(j, k)];
+                    }
+
+                    tmp / self[(j, j)]
+                };
+            }
+        }
+
+        return mat;
+    }
 }
 
 impl<T: Copy + Default, const R: usize, const C: usize> Default for Matrix<T, R, C> {
