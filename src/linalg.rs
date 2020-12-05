@@ -1,13 +1,18 @@
-use core::ops::{Add, Index, IndexMut, Mul};
+
+use core::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use libm::{powf, sqrtf};
 
 #[derive(Debug, Copy, Clone)]
-struct Matrix<T, const R: usize, const C: usize> {
+pub struct Matrix<T, const R: usize, const C: usize> {
     data: [[T; R]; C],
 }
 
 impl<T: Copy + Default, const R: usize, const C: usize> Matrix<T, R, C> {
+    pub fn from_array(data: [[T; R]; C]) -> Self {
+        return Matrix { data };
+    }
+
     pub fn transpose(self) -> Matrix<T, C, R> {
         let mut mat: Matrix<T, C, R> = Default::default();
 
@@ -22,32 +27,65 @@ impl<T: Copy + Default, const R: usize, const C: usize> Matrix<T, R, C> {
 }
 
 impl<const N: usize> Matrix<f32, N, N> {
+    pub fn identity() -> Self {
+        let mut mat: Self = Default::default();
+
+        for i in 0..N {
+            mat[(i, i)] = 1.0;
+        }
+
+        return mat;
+    }
+
     // Return the lower choleksy factorization
+    // Does not check that the matrix meets requirements
+    // for factorization.
     pub fn cholesky(self) -> Self {
         let mut mat: Self = Default::default();
 
         for i in 0..N {
             for j in 0..i {
                 let mut tmp = self[(i, j)];
+                // We are off the diagonal
+                // subtract all preceeding products
+                for k in 0..j {
+                    tmp -= mat[(i, k)] * mat[(j, k)];
+                }
+                mat[(i, j)] = tmp / mat[(j, j)]
+            }
+            let mut tmp = self[(i, i)];
+            // We are on a diagonal,
+            // subtract square of each
+            // preceeding Ljk in row
+            for k in 0..i {
+                tmp -= powf(mat[(i, k)], 2.0);
+            }
 
-                mat[(i, j)] = if i == j {
-                    // We are on a diagonal,
-                    // subtract square of each
-                    // preceeding Ljk in row
-                    for k in 0..j {
-                        tmp -= powf(mat[(j, k)], 2.0);
-                    }
+            mat[(i, i)] = sqrtf(tmp)
+        }
 
-                    sqrtf(tmp)
-                } else {
-                    // We are off the diagonal
-                    // subtract all preceeding products
-                    for k in 0..j {
-                        tmp -= mat[(i, k)] * mat[(j, k)];
-                    }
+        return mat;
+    }
 
-                    tmp / self[(j, j)]
-                };
+    // This calculates the inverse of the matrix
+    // using a cholesky decomposition
+    pub fn invert_cholesky(self) -> Self {
+        let mut mat: Self = Self::identity();
+
+        let chol = self.cholesky();
+
+        // First solve L*m = I
+        // Foward substitution by columns
+        // For each column
+        for j in (0..N).rev() {
+            mat[(j, j)] = 1.0 / chol[(j, j)];
+            for k in (0..j).rev() {
+                for i in (0..j).rev() {
+                    mat[(k, j)] = mat[(k, j)] + mat[(k, i)] * chol[(i, j)];
+                }
+            }
+            for k in (0..j).rev() {
+                mat[(k, j)] = -mat[(j, j)] * mat[(k, j)];
             }
         }
 
@@ -86,6 +124,35 @@ impl<T: Add<Output = T> + Copy + Default, const R: usize, const C: usize> Add fo
             }
         }
         return sum;
+    }
+}
+
+impl<T: Add<Output = T> + Copy + Default, const R: usize, const C: usize> AddAssign
+    for Matrix<T, R, C>
+{
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
+impl<T: Sub<Output = T> + Copy + Default, const R: usize, const C: usize> Sub for Matrix<T, R, C> {
+    type Output = Self;
+    fn sub(self, other: Self) -> Self {
+        let mut diff: Self = Default::default();
+        for i in 0..R {
+            for j in 0..C {
+                diff[(i, j)] = self[(i, j)] - other[(i, j)];
+            }
+        }
+        return diff;
+    }
+}
+
+impl<T: Sub<Output = T> + Copy + Default, const R: usize, const C: usize> SubAssign
+    for Matrix<T, R, C>
+{
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other
     }
 }
 
@@ -132,5 +199,41 @@ where
         }
 
         return mat;
+    }
+}
+
+impl<T, const R: usize, const C: usize> MulAssign<T> for Matrix<T, R, C>
+where
+    T: Add<Output = T> + Mul<Output = T> + Copy + Default,
+{
+    fn mul_assign(&mut self, rhs: T) {
+        *self = *self * rhs;
+    }
+}
+
+impl<T, const R: usize, const C: usize> Div<T> for Matrix<T, R, C>
+where
+    T: Add<Output = T> + Div<Output = T> + Copy + Default,
+{
+    type Output = Matrix<T, R, C>;
+    fn div(self, rhs: T) -> Self::Output {
+        let mut mat: Self::Output = Default::default();
+
+        for i in 0..R {
+            for j in 0..C {
+                mat[(i, j)] = self[(i, j)] / rhs;
+            }
+        }
+
+        return mat;
+    }
+}
+
+impl<T, const R: usize, const C: usize> DivAssign<T> for Matrix<T, R, C>
+where
+    T: Add<Output = T> + Div<Output = T> + Copy + Default,
+{
+    fn div_assign(&mut self, rhs: T) {
+        *self = *self / rhs;
     }
 }
