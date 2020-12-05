@@ -1,56 +1,15 @@
+use crate::linalg::Matrix;
+use crate::quaternions::Quaternion;
+use cortex_m::asm;
 use libm::sqrtf;
-use nalgebra::{storage::Owned, Unit};
-use nalgebra::{
-    Matrix, Matrix6, Quaternion, Scalar, UnitQuaternion, Vector, Vector3, Vector6, U1, U6, U9,
-};
 
-type Vector9<N> = Matrix<N, U9, U1, Owned<N, U9, U1>>;
-pub type Matrix9<N> = Matrix<N, U9, U9, Owned<N, U9, U9>>;
-pub type Matrix6x9<N> = Matrix<N, U6, U9, Owned<N, U6, U9>>;
-
-// Can't impl for Vec9 AFAIK because struct is outside crate
-//pub fn new_vector9<T: Scalar, Default>(m1: T, m2: T, m3: T, m4: T, m5: T, m6: T, m7: T, m8: T, m9: T) -> Vector9<T> {
-//        let mut vec: Vector9<T> = Default::default();
-//        vec[0] = m1;
-//        vec[1] = m2;
-//        vec[2] = m3;
-//        vec[3] = m4;
-//        vec[4] = m5;
-//        vec[5] = m6;
-//        vec[6] = m7;
-//        vec[7] = m8;
-//        vec[8] = m9;
-//        return vec;
-//}
-pub fn new_vector9(
-    m1: f32,
-    m2: f32,
-    m3: f32,
-    m4: f32,
-    m5: f32,
-    m6: f32,
-    m7: f32,
-    m8: f32,
-    m9: f32,
-) -> Vector9<f32> {
-    let mut vec: Vector9<f32> = Default::default();
-    vec[0] = m1;
-    vec[1] = m2;
-    vec[2] = m3;
-    vec[3] = m4;
-    vec[4] = m5;
-    vec[5] = m6;
-    vec[6] = m7;
-    vec[7] = m8;
-    vec[8] = m9;
-    return vec;
-}
+use rtt_target::rprintln;
 
 // Deriving default avoids initialization issues in arrays
 // Using unsafe in the arrays may actually be a better choice
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct State {
-    pub pose: UnitQuaternion<f32>,
+    pub pose: Quaternion,
     pub wx: f32,
     pub wy: f32,
     pub wz: f32,
@@ -60,7 +19,8 @@ pub struct State {
 // NOTE: Assumes small angles in rotation quaternion construction
 fn F(x: State, dt: f32) -> State {
     let State { pose, wx, wy, wz } = x;
-    let update_rotation = UnitQuaternion::new(Vector3::new(wx * dt, wy * dt, wz * dt));
+    let update_rotation =
+        Quaternion::new(1.0, wx * dt / 2.0, wy * dt / 2.0, wz * dt / 2.0).normalized();
     let new_pose = update_rotation * pose;
     return State {
         pose: new_pose,
@@ -69,6 +29,7 @@ fn F(x: State, dt: f32) -> State {
         wz,
     };
 }
+
 // Deriving default avoids initialization issues in arrays
 // Using unsafe in the arrays may actually be a better choice
 #[derive(Copy, Clone, Default)]
@@ -110,49 +71,42 @@ impl Observation {
     }
 }
 
-impl From<Observation> for Vector9<f32> {
+impl From<Observation> for Matrix<f32, 9, 1> {
     fn from(z: Observation) -> Self {
-        return new_vector9(z.ax, z.ay, z.az, z.gx, z.gy, z.gz, z.mx, z.my, z.mz);
+        return Matrix::from_array([[z.ax, z.ay, z.az, z.gx, z.gy, z.gz, z.mx, z.my, z.mz]]);
     }
 }
 
-impl From<Vector9<f32>> for Observation {
-    fn from(vec: Vector9<f32>) -> Self {
+impl From<Matrix<f32, 9, 1>> for Observation {
+    fn from(mat: Matrix<f32, 9, 1>) -> Self {
         return Observation {
-            ax: vec[0],
-            ay: vec[1],
-            az: vec[2],
-            gx: vec[3],
-            gy: vec[4],
-            gz: vec[5],
-            mx: vec[6],
-            my: vec[7],
-            mz: vec[8],
+            ax: mat[(0, 0)],
+            ay: mat[(1, 0)],
+            az: mat[(2, 0)],
+            gx: mat[(3, 0)],
+            gy: mat[(4, 0)],
+            gz: mat[(5, 0)],
+            mx: mat[(6, 0)],
+            my: mat[(7, 0)],
+            mz: mat[(8, 0)],
         };
     }
 }
 
-//impl Into<Vector6<f32>> for Observation {
-//    fn into(self) -> Vector6<f32> {
-//        return Vector6::new(
-//            self.ax,
-//            self.ay,
-//            self.az,
-//            self.gx,
-//            self.gy,
-//            self.gz
-//        )
-//    }
-//}
+impl Into<Matrix<f32, 6, 1>> for Observation {
+    fn into(self) -> Matrix<f32, 6, 1> {
+        return Matrix::from_array([[self.ax, self.ay, self.az, self.gx, self.gy, self.gz]]);
+    }
+}
 
 fn H(x: State) -> Observation {
     // The Earth frame gravity vector
-    let grav_earth = Vector3::<f32>::new(0.0, 0.0, 1.0);
-    let grav_body = x.pose.transform_vector(&grav_earth);
+    let grav_earth = Quaternion::new(0.0, 0.0, 0.0, 1.0);
+    let grav_body = x.pose * grav_earth * x.pose.conj();
 
     // The Earth frame magnetic field vector
-    let mag_earth = Vector3::<f32>::new(1.0, 0.0, 0.0);
-    let mag_body = x.pose.transform_vector(&mag_earth);
+    let mag_earth = Quaternion::new(0.0, 1.0, 0.0, 0.0);
+    let mag_body = x.pose * mag_earth * x.pose.conj();
 
     return Observation {
         ax: grav_body.x,
@@ -169,7 +123,7 @@ fn H(x: State) -> Observation {
 
 // Deriving default avoids initialization issues in arrays
 // Using unsafe in the arrays may actually be a better choice
-#[derive(Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default)]
 struct SigmaDeviation {
     rx: f32,
     ry: f32,
@@ -179,29 +133,29 @@ struct SigmaDeviation {
     wz: f32,
 }
 
-// TODO: For some reason, implementing this from does not
-// implement into.
-impl From<Vector6<f32>> for SigmaDeviation {
-    fn from(vec: Vector6<f32>) -> Self {
+impl From<Matrix<f32, 6, 1>> for SigmaDeviation {
+    fn from(mat: Matrix<f32, 6, 1>) -> Self {
         return SigmaDeviation {
-            rx: vec[0],
-            ry: vec[1],
-            rz: vec[2],
-            wx: vec[3],
-            wy: vec[4],
-            wz: vec[5],
+            rx: mat[(0, 0)],
+            ry: mat[(1, 0)],
+            rz: mat[(2, 0)],
+            wx: mat[(3, 0)],
+            wy: mat[(4, 0)],
+            wz: mat[(5, 0)],
         };
     }
 }
 
-impl Into<Vector6<f32>> for SigmaDeviation {
-    fn into(self) -> Vector6<f32> {
-        return Vector6::<f32>::new(self.rx, self.ry, self.rz, self.wx, self.wy, self.wz);
+impl Into<Matrix<f32, 6, 1>> for SigmaDeviation {
+    fn into(self) -> Matrix<f32, 6, 1> {
+        return Matrix::<f32, 6, 1>::from_array([[
+            self.rx, self.ry, self.rz, self.wx, self.wy, self.wz,
+        ]]);
     }
 }
 
 fn apply_deviation(dev: SigmaDeviation, x: State) -> State {
-    let dev_rotation = UnitQuaternion::new(Vector3::new(dev.rx, dev.ry, dev.rz));
+    let dev_rotation = Quaternion::new(1.0, dev.rx/2.0, dev.ry/2.0, dev.rz/2.0).normalized();
     let new_pose = dev_rotation * x.pose;
     return State {
         pose: new_pose,
@@ -212,11 +166,11 @@ fn apply_deviation(dev: SigmaDeviation, x: State) -> State {
 }
 
 fn determine_deviation(x: State, x_mean: State) -> SigmaDeviation {
-    let rotation = x.pose * x_mean.pose.inverse();
+    let rotation = x.pose * x_mean.pose.conj();
     return SigmaDeviation {
-        rx: rotation.vector()[0],
-        ry: rotation.vector()[1],
-        rz: rotation.vector()[2],
+        rx: rotation.x,
+        ry: rotation.y,
+        rz: rotation.z,
         wx: x.wx - x_mean.wx,
         wy: x.wy - x_mean.wy,
         wz: x.wz - x_mean.wz,
@@ -227,7 +181,7 @@ fn determine_deviation(x: State, x_mean: State) -> SigmaDeviation {
 const N: usize = 6;
 pub struct UKF {
     current_estimate: State,
-    variance: Matrix6<f32>,
+    variance: Matrix<f32, 6, 6>,
 
     sigma_predictions: [State; 2 * N],
     prediction_deviations: [SigmaDeviation; 2 * N],
@@ -237,20 +191,20 @@ impl UKF {
     pub fn new() -> UKF {
         UKF {
             current_estimate: State {
-                pose: UnitQuaternion::identity(),
+                pose: Default::default(),
                 wx: 0.0,
                 wy: 0.0,
                 wz: 0.0,
             },
-            variance: Matrix6::<f32>::identity(),
+            variance: Matrix::<f32, 6, 6>::identity(),
             sigma_predictions: Default::default(),
             prediction_deviations: Default::default(),
         }
     }
 
-    pub fn predict(&mut self, Q: Matrix6<f32>, dt: f32) -> State {
+    pub fn predict(&mut self, Q: Matrix<f32, 6, 6>, dt: f32) -> State {
         // Create the relative sigma deviations
-        let sigma_deviations = sqrtf(2.0*N as f32) * self.variance.cholesky().unwrap().l();
+        let sigma_deviations = self.variance.cholesky() * sqrtf(N as f32);
         let mut sigma_states: [State; N * 2] = Default::default();
 
         // Construct the absolute sigma states
@@ -275,6 +229,7 @@ impl UKF {
             sigma_states[N + i] = apply_deviation(positive_deviation, self.current_estimate);
         }
 
+        rprintln!("{:?}", sigma_states);
         // Map the sigma states into the prediction space
         let mut sigma_predictions: [State; 2 * N] = Default::default();
         for (i, &state) in sigma_states.iter().enumerate() {
@@ -285,7 +240,7 @@ impl UKF {
         let predicted_state = {
             // FIXME: Check the runtime for this mean_of, might be slow iterative
             // TODO: Possible error source
-            let estimated_pose = UnitQuaternion::mean_of(sigma_predictions.iter().map(|y| y.pose));
+            let estimated_pose = Quaternion::mean_of(sigma_predictions.iter().map(|y| y.pose));
             let wx = sigma_predictions.iter().map(|y| y.wx).sum::<f32>()
                 / (sigma_predictions.len() as f32);
             let wy = sigma_predictions.iter().map(|y| y.wy).sum::<f32>()
@@ -308,9 +263,9 @@ impl UKF {
 
         // TODO: Next step is to calculate deviations and covariance
         let prediction_variance = {
-            let mut tmp_variance: Matrix6<f32> = Default::default();
+            let mut tmp_variance: Matrix<f32, 6, 6> = Default::default();
             for &dev in prediction_deviations.iter() {
-                let sigma_mat: Vector6<f32> = dev.into();
+                let sigma_mat: Matrix<f32, 6, 1> = dev.into();
                 tmp_variance += sigma_mat * sigma_mat.transpose();
             }
             tmp_variance /= prediction_deviations.len() as f32;
@@ -327,7 +282,7 @@ impl UKF {
         return predicted_state;
     }
 
-    pub fn update(&mut self, z: Observation, R: Matrix9<f32>) -> State {
+    pub fn update(&mut self, z: Observation, R: Matrix<f32, 9, 9>) -> State {
         // Map the sigma predictions into the observation space
         // and calculate the mean and covariance.
         let mut sigma_observations: [Observation; N * 2] = Default::default();
@@ -368,11 +323,11 @@ impl UKF {
         };
 
         let (observation_variance, observation_deviations) = {
-            let mut tmp_deviations: [Vector9<f32>; 2 * N] = Default::default();
-            let mut tmp_variance: Matrix9<f32> = Default::default();
+            let mut tmp_deviations: [Matrix<f32, 9, 1>; 2 * N] = Default::default();
+            let mut tmp_variance: Matrix<f32, 9, 9> = Default::default();
             for (i, &elem) in sigma_observations.iter().enumerate() {
-                let sigma_obs: Vector9<f32> = elem.into();
-                let pred_obs: Vector9<f32> = predicted_observation.into();
+                let sigma_obs: Matrix<f32, 9, 1> = elem.into();
+                let pred_obs: Matrix<f32, 9, 1> = predicted_observation.into();
                 let zd = sigma_obs - pred_obs;
                 tmp_deviations[i] = zd;
                 tmp_variance += zd * zd.transpose();
@@ -386,13 +341,13 @@ impl UKF {
 
         // Calculate the cross correlation
         let cross_variance = {
-            let mut tmp_variance: Matrix6x9<f32> = Default::default();
+            let mut tmp_variance: Matrix<f32, 6, 9> = Default::default();
             for (&pred_deviation, &obs_deviation) in self
                 .prediction_deviations
                 .iter()
                 .zip(observation_deviations.iter())
             {
-                let pd: Vector6<f32> = pred_deviation.into();
+                let pd: Matrix<f32, 6, 1> = pred_deviation.into();
                 tmp_variance += pd * obs_deviation.transpose();
             }
 
@@ -401,14 +356,15 @@ impl UKF {
             tmp_variance
         };
 
-        let kalman_gain = cross_variance * innovation_variance.try_inverse().unwrap();
-        let zv: Vector9<f32> = z.into();
-        let pov: Vector9<f32> = predicted_observation.into();
+        let kalman_gain = cross_variance * innovation_variance.invert_cholesky();
+        let zv: Matrix<f32, 9, 1> = z.into();
+        let pov: Matrix<f32, 9, 1> = predicted_observation.into();
         let innovation = zv - pov;
         let delta = kalman_gain * innovation;
 
         self.current_estimate = apply_deviation(delta.into(), self.current_estimate);
         self.variance = self.variance - kalman_gain * innovation_variance * kalman_gain.transpose();
+
         return self.current_estimate;
     }
 }

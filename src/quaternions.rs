@@ -1,5 +1,6 @@
-use core::ops::{Add, Mul, Sub};
+use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub};
 use libm::{powf, sqrtf};
+use rtt_target::rprintln;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Quaternion {
@@ -10,8 +11,21 @@ pub struct Quaternion {
 }
 
 impl Quaternion {
-    pub(crate) fn new(w: f32, x: f32, y: f32, z: f32) -> Self {
+    pub fn new(w: f32, x: f32, y: f32, z: f32) -> Self {
         return Quaternion { w, x, y, z };
+    }
+
+    // Dead simple calculation of the mean of quaternions
+    // Works for relatively "close" UNIT quaternions.
+    pub fn mean_of(quats: impl Iterator<Item = Quaternion>) -> Quaternion {
+        let mut tmp_quat = Quaternion::new(0.0, 0.0, 0.0, 0.0);
+        let mut n = 0;
+        for q in quats {
+            tmp_quat += q;
+            n += 1;
+        }
+        tmp_quat /= n as f32;
+        return tmp_quat.normalized();
     }
 
     pub fn norm(&self) -> f32 {
@@ -47,6 +61,12 @@ impl Quaternion {
     }
 }
 
+impl Default for Quaternion {
+    fn default() -> Self {
+        return Quaternion::new(1.0, 0.0, 0.0, 0.0);
+    }
+}
+
 impl Mul for Quaternion {
     type Output = Self;
 
@@ -60,6 +80,42 @@ impl Mul for Quaternion {
     }
 }
 
+impl Mul<f32> for Quaternion {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self {
+        return Quaternion {
+            w: self.w * rhs,
+            x: self.x * rhs,
+            y: self.y * rhs,
+            z: self.z * rhs,
+        };
+    }
+}
+
+impl MulAssign<f32> for Quaternion {
+    fn mul_assign(&mut self, rhs: f32) {
+        *self = *self * rhs;
+    }
+}
+
+impl Div<f32> for Quaternion {
+    type Output = Self;
+    fn div(self, rhs: f32) -> Self {
+        return Quaternion {
+            w: self.w / rhs,
+            x: self.x / rhs,
+            y: self.y / rhs,
+            z: self.z / rhs,
+        };
+    }
+}
+
+impl DivAssign<f32> for Quaternion {
+    fn div_assign(&mut self, rhs: f32) {
+        *self = *self / rhs;
+    }
+}
+
 impl Add for Quaternion {
     type Output = Self;
 
@@ -70,6 +126,12 @@ impl Add for Quaternion {
             y: self.y + rhs.y,
             z: self.z + rhs.z,
         };
+    }
+}
+
+impl AddAssign for Quaternion {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
     }
 }
 

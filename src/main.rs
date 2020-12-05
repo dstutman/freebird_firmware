@@ -1,4 +1,4 @@
-#![feature(const_generics)]
+#![feature(min_const_generics)]
 #![no_std]
 #![no_main]
 
@@ -8,9 +8,10 @@ use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::{self, asm};
 use cortex_m_rt::{entry, exception};
 use futures::future::join;
-use nalgebra::{Matrix6, Vector3};
+use libm::{powf, sqrtf};
+use linalg::Matrix;
+use quaternions::Quaternion;
 use stm32f3::stm32f303;
-use ukf::Matrix9;
 
 use crate::executor::Executor;
 use futures::TryFutureExt;
@@ -24,6 +25,7 @@ mod executor;
 mod i2c;
 mod linalg;
 mod lsm;
+mod quaternions;
 mod ukf;
 mod usart;
 
@@ -201,34 +203,33 @@ async fn test_future() {
                 //Matrix6::<f32>::new(
                 //    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                 //    0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.,
-                //),
-                Matrix6::<f32>::identity(),
+                //)*0.9,
+                Matrix::<f32, 6, 6>::identity() * 0.5,
                 (get_ticks() - last_ticks) as f32 / 1000.0,
             );
 
-            let ab = Vector3::<f32>::new(
-                acc_sample.ax - abx,
-                acc_sample.ay - aby,
-                acc_sample.az - abz,
-            )
-            .normalize();
-            let fake_mag = prediction
-                .pose
-                .transform_vector(&Vector3::new(-1.0, 0.0, 0.0));
-
-            let pred = filter.update(
+            let mut ax = acc_sample.ax - abx;
+            let mut ay = acc_sample.ay - aby;
+            let mut az = acc_sample.az - abz;
+            let norm_a = sqrtf(powf(ax, 2.0) + powf(ay, 2.0) + powf(az, 2.0));
+            ax /= norm_a;
+            ay /= norm_a;
+            az /= norm_a;
+            let fake_mag =
+                prediction.pose * Quaternion::new(0.0, 1.0, 0.0, 0.0) * prediction.pose.conj();
+            let estimate = filter.update(
                 ukf::Observation::new(
-                    ab.x,
-                    ab.y,
-                    ab.z,
-                    (rate_sample.gx - gbx) * PI / 180.0,
-                    (rate_sample.gy - gby) * PI / 180.0,
-                    (rate_sample.gz - gbz) * PI / 180.0,
+                    ax,
+                    ay,
+                    az,
+                    rate_sample.gx * PI / 180.0,
+                    rate_sample.gy * PI / 180.0,
+                    rate_sample.gz * PI / 180.0,
                     fake_mag.x,
                     fake_mag.y,
                     fake_mag.z,
                 ),
-                Matrix9::<f32>::identity() * 0.01,
+                Matrix::<f32, 9, 9>::identity() * 0.05,
             );
             //// Construct a quaternion rotating from the Earth
             //// frame to the measured frame.
@@ -268,24 +269,24 @@ async fn test_future() {
             write!(
                 Wrapper::new(&mut msg),
                 "w{}wa{}ab{}bc{}c\r\n",
-                pred.pose.scalar(),
-                pred.pose.vector()[0],
-                pred.pose.vector()[1],
-                pred.pose.vector()[2]
+                estimate.pose.w,
+                estimate.pose.x,
+                estimate.pose.y,
+                estimate.pose.z
             )
             .unwrap();
             usart::write_message(&msg).await.unwrap();
-            rprintln!(
-                "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
-                acc_sample.ax - abx,
-                acc_sample.ay - aby,
-                acc_sample.az - abz,
-                rate_sample.gx - gbx,
-                rate_sample.gy - gby,
-                rate_sample.gz - gbz,
-                bmp_sample.press,
-                bmp_sample.temp
-            );
+            //rprintln!(
+            //    "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
+            //    acc_sample.ax - abx,
+            //    acc_sample.ay - aby,
+            //    acc_sample.az - abz,
+            //    rate_sample.gx - gbx,
+            //    rate_sample.gy - gby,
+            //    rate_sample.gz - gbz,
+            //    bmp_sample.press,
+            //    bmp_sample.temp
+            //);
             last_ticks = get_ticks();
         }
     }
