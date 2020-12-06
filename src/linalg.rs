@@ -2,7 +2,9 @@ use core::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
+use cortex_m::asm;
 use libm::{powf, sqrtf};
+use rtt_target::rprintln;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Matrix<T, const R: usize, const C: usize> {
@@ -72,17 +74,17 @@ impl<const N: usize> Matrix<f32, N, N> {
                 }
                 mat[(i, j)] = tmp / mat[(j, j)]
             }
-            let mut tmp = self[(i, i)];
+             
             // We are on a diagonal,
             // subtract square of each
             // preceeding Ljk in row
+            let mut tmp = self[(i, i)];
             for k in 0..i {
                 tmp -= powf(mat[(i, k)], 2.0);
             }
 
             mat[(i, i)] = sqrtf(tmp)
         }
-
         return mat;
     }
 

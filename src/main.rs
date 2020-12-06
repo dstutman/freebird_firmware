@@ -199,7 +199,7 @@ async fn test_future() {
     let mut i = 0;
     loop {
         i += 1;
-        if get_ticks() - last_ticks > 200 {
+        if get_ticks() - last_ticks > 20 {
             let acc_sample = lsm.acceleration().await.unwrap();
             let rate_sample = lsm.angular_rate().await.unwrap();
             let bmp_sample = bmp.pressure_temperature().await.unwrap();
@@ -208,7 +208,7 @@ async fn test_future() {
                 //    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                 //    0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.,
                 //)*0.9,
-                Matrix::<f32, 6, 6>::ones() * 0.05,
+                Matrix::<f32, 6, 6>::identity(),
                 (get_ticks() - last_ticks) as f32 / 1000.0,
             );
 
@@ -219,6 +219,7 @@ async fn test_future() {
             ax /= norm_a;
             ay /= norm_a;
             az /= norm_a;
+            //rprintln!("{}, {}, {}", ax, ay, az);
             let fake_mag =
                 prediction.pose * Quaternion::new(0.0, 1.0, 0.0, 0.0) * prediction.pose.conj();
             let estimate = filter.update(
@@ -230,9 +231,9 @@ async fn test_future() {
                     rate_sample.gy * PI / 180.0,
                     rate_sample.gz * PI / 180.0
                 ),
-                Matrix::<f32, 6, 6>::identity() * 0.05,
+                Matrix::<f32, 6, 6>::identity() * 0.02,
             );
-            if i > 2{panic!()}
+            //if i >15{panic!()}
             
             //// Construct a quaternion rotating from the Earth
             //// frame to the measured frame.

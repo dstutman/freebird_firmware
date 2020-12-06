@@ -17,7 +17,7 @@ pub struct State {
 impl State {
     fn mean_of<'a>(states: &[State]) -> State {
         let mp = Quaternion::mean_of(states.iter().map(|x| x.pose));
-        
+
         // The angular velocity means are best computed in a loop because
         // iterators don't provide reliable length information.
         let mut n = 0.0;
@@ -105,6 +105,24 @@ impl From<Matrix<f32, 6, 1>> for Observation {
 impl From<Observation> for Matrix<f32, 6, 1> {
     fn from(obs: Observation) -> Self {
         return Matrix::from_array([[obs.ax, obs.ay, obs.az, obs.wx, obs.wy, obs.wz]]);
+    }
+}
+
+pub fn check_notnan<const R: usize, const C: usize>(mat: Matrix<f32, R, C>) {
+    for i in 0..R {
+        for j in 0..C {
+            if mat[(i, j)].is_nan() {
+                asm::bkpt()
+            }
+        }
+    }
+}
+
+pub fn check_notnanarr(arr: &[State]) {
+    for elem in arr {
+        if elem.wx.is_nan() || elem.wy.is_nan() || elem.wz.is_nan() {
+            asm::bkpt()
+        }
     }
 }
 
@@ -230,6 +248,7 @@ fn deviation(x: State, m: State) -> Sigma {
 const N: usize = 6;
 // The dimensionality of the observation variance.
 const M: usize = 6;
+
 pub struct UKF {
     x: State,
     P: Matrix<f32, N, N>,
@@ -241,10 +260,10 @@ impl UKF {
     pub fn new() -> UKF {
         return UKF {
             x: Default::default(),
-            P: Matrix::identity(),
+            P: Matrix::identity()*0.05,
             Y: Default::default(),
-            WP: Default::default()
-        }
+            WP: Default::default(),
+        };
     }
 
     // This function predicts the next state and updates
@@ -253,7 +272,8 @@ impl UKF {
     pub fn predict(&mut self, Q: Matrix<f32, N, N>, dt: f32) -> State {
         // Calculate the sigma deviations
         let W = (self.P * N as f32).cholesky();
-
+        check_notnan(W);
+        
         // Apply the columns of W as deviations
         // to the current state estimate.
         let x = self.x;
@@ -313,11 +333,14 @@ impl UKF {
         let mut Z: [Observation; 2 * N + 1] = Default::default();
         for i in 0..(2 * N + 1) {
             Z[i] = h(self.Y[i]);
+            //rprintln!("{:?}", h(self.Y[i]));
         }
 
         // Use the predicted observations to calculate
         // the expected observation mean and variance
         let za = Observation::mean_of(&Z);
+        //rprintln!("{:?}", z);
+        //rprintln!("{:?}", za);
         let mut WZ: [Matrix<f32, M, 1>; 2 * N + 1] = Default::default();
         for i in 0..(2 * N + 1) {
             let mean_mat: Matrix<f32, M, 1> = z.into();
@@ -357,9 +380,11 @@ impl UKF {
         let P = self.P - K * PV * K.transpose();
 
         // Update the internal state
-        self.x = State {pose: x.pose.normalized(), ..x};
+        self.x = State {
+            pose: x.pose.normalized(),
+            ..x
+        };
         self.P = P;
-        rprintln!("{:?}", self.x);
 
         return self.x;
     }
