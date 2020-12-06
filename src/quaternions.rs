@@ -4,15 +4,31 @@ use rtt_target::rprintln;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Quaternion {
-    pub w: f32,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+    w: f32,
+    x: f32,
+    y: f32,
+    z: f32,
 }
 
 impl Quaternion {
     pub fn new(w: f32, x: f32, y: f32, z: f32) -> Self {
         return Quaternion { w, x, y, z };
+    }
+
+    pub fn w(&self) -> f32 {
+        self.w
+    }
+
+    pub fn x(&self) -> f32 {
+        self.x
+    }
+
+    pub fn y(&self) -> f32 {
+        self.y
+    }
+
+    pub fn z(&self) -> f32 {
+        self.z
     }
 
     // Dead simple calculation of the mean of quaternions
@@ -29,7 +45,7 @@ impl Quaternion {
     }
 
     pub fn norm(&self) -> f32 {
-        return sqrtf(powf(self.w, 2.) + powf(self.x, 2.) + powf(self.y, 2.) + powf(self.z, 2.));
+        return sqrtf(powf(self.w, 2.0) + powf(self.x, 2.0) + powf(self.y, 2.0) + powf(self.z, 2.0));
     }
 
     pub fn conj(&self) -> Self {

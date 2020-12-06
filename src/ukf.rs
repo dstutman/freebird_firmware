@@ -229,7 +229,6 @@ impl UKF {
             sigma_states[N + i] = apply_deviation(positive_deviation, self.current_estimate);
         }
 
-        rprintln!("{:?}", sigma_states);
         // Map the sigma states into the prediction space
         let mut sigma_predictions: [State; 2 * N] = Default::default();
         for (i, &state) in sigma_states.iter().enumerate() {

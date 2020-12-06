@@ -26,7 +26,8 @@ mod i2c;
 mod linalg;
 mod lsm;
 mod quaternions;
-mod ukf;
+//mod ukf;
+mod ukf2;
 mod usart;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
@@ -193,18 +194,21 @@ async fn test_future() {
     gby /= n as f32;
     gbz /= n as f32;
 
+    // NOTE!!!: Don't put the instantiation inside the loop...
+    let mut filter = ukf2::UKF::new();
+    let mut i = 0;
     loop {
-        if get_ticks() - last_ticks > 20 {
+        i += 1;
+        if get_ticks() - last_ticks > 200 {
             let acc_sample = lsm.acceleration().await.unwrap();
             let rate_sample = lsm.angular_rate().await.unwrap();
             let bmp_sample = bmp.pressure_temperature().await.unwrap();
-            let mut filter = ukf::UKF::new();
             let prediction = filter.predict(
                 //Matrix6::<f32>::new(
                 //    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                 //    0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.,
                 //)*0.9,
-                Matrix::<f32, 6, 6>::identity() * 0.5,
+                Matrix::<f32, 6, 6>::ones() * 0.05,
                 (get_ticks() - last_ticks) as f32 / 1000.0,
             );
 
@@ -218,19 +222,18 @@ async fn test_future() {
             let fake_mag =
                 prediction.pose * Quaternion::new(0.0, 1.0, 0.0, 0.0) * prediction.pose.conj();
             let estimate = filter.update(
-                ukf::Observation::new(
+                ukf2::Observation::new(
                     ax,
                     ay,
                     az,
                     rate_sample.gx * PI / 180.0,
                     rate_sample.gy * PI / 180.0,
-                    rate_sample.gz * PI / 180.0,
-                    fake_mag.x,
-                    fake_mag.y,
-                    fake_mag.z,
+                    rate_sample.gz * PI / 180.0
                 ),
-                Matrix::<f32, 9, 9>::identity() * 0.05,
+                Matrix::<f32, 6, 6>::identity() * 0.05,
             );
+            if i > 2{panic!()}
+            
             //// Construct a quaternion rotating from the Earth
             //// frame to the measured frame.
             //let gyro_quat = {
@@ -269,10 +272,10 @@ async fn test_future() {
             write!(
                 Wrapper::new(&mut msg),
                 "w{}wa{}ab{}bc{}c\r\n",
-                estimate.pose.w,
-                estimate.pose.x,
-                estimate.pose.y,
-                estimate.pose.z
+                estimate.pose.w(),
+                estimate.pose.x(),
+                estimate.pose.y(),
+                estimate.pose.z()
             )
             .unwrap();
             usart::write_message(&msg).await.unwrap();

@@ -1,5 +1,6 @@
-
-use core::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use core::ops::{
+    Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
+};
 
 use libm::{powf, sqrtf};
 
@@ -13,12 +14,30 @@ impl<T: Copy + Default, const R: usize, const C: usize> Matrix<T, R, C> {
         return Matrix { data };
     }
 
+    pub fn size(self) -> (usize, usize) {
+        (R, C)
+    }
+
     pub fn transpose(self) -> Matrix<T, C, R> {
         let mut mat: Matrix<T, C, R> = Default::default();
 
         for i in 0..R {
             for j in 0..C {
                 mat[(j, i)] = self[(i, j)];
+            }
+        }
+
+        return mat;
+    }
+}
+
+impl<const R: usize, const C: usize> Matrix<f32, R, C> {
+    pub fn ones() -> Self {
+        let mut mat: Self = Default::default();
+
+        for i in 0..R {
+            for j in 0..C {
+                mat[(i, j)] = 1.0;
             }
         }
 
@@ -111,6 +130,19 @@ impl<T, const R: usize, const C: usize> Index<(usize, usize)> for Matrix<T, R, C
 impl<T, const R: usize, const C: usize> IndexMut<(usize, usize)> for Matrix<T, R, C> {
     fn index_mut(&mut self, (r, c): (usize, usize)) -> &mut Self::Output {
         return &mut self.data[c][r];
+    }
+}
+
+impl<T: Neg<Output = T> + Copy + Default, const R: usize, const C: usize> Neg for Matrix<T, R, C> {
+    type Output = Self;
+    fn neg(self) -> Self {
+        let mut neg: Self = Default::default();
+        for i in 0..R {
+            for j in 0..C {
+                neg[(i, j)] = -self[(i, j)];
+            }
+        }
+        return neg;
     }
 }
 
