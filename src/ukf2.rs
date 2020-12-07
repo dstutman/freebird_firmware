@@ -260,10 +260,42 @@ impl UKF {
     pub fn new() -> UKF {
         return UKF {
             x: Default::default(),
-            P: Matrix::identity()*0.05,
+            P: Matrix::identity() * 0.05,
             Y: Default::default(),
             WP: Default::default(),
         };
+    }
+
+    // Internal methods for setting internal states
+    // while upholding invariants.
+    fn update_estimate(&mut self, x: State) {
+        self.x = State {
+            // Ensure normalized pose
+            pose: x.pose.normalized(),
+            ..x
+        }
+    }
+
+    fn update_variance(&mut self, P: Matrix<f32, N, N>) {
+        // Ensure symmetric variance
+        self.P = P * 0.5 + P.transpose() * 0.5
+    }
+
+    fn update_predictions(&mut self, Y: [State; 2 * N + 1]) {
+        self.Y = Y;
+    }
+
+    fn update_deltas(&mut self, WP: [Sigma; 2 * N + 1]) {
+        self.WP = WP;
+    }
+
+    // Public methods for getting state and variance
+    pub fn get_state(&self) -> State {
+        return self.x;
+    }
+
+    pub fn get_variance(&self) -> Matrix<f32, N, N> {
+        return self.P;
     }
 
     // This function predicts the next state and updates
@@ -272,8 +304,9 @@ impl UKF {
     pub fn predict(&mut self, Q: Matrix<f32, N, N>, dt: f32) -> State {
         // Calculate the sigma deviations
         let W = (self.P * N as f32).cholesky();
+        //rprintln!("{:?}", self.P * N as f32);
         check_notnan(W);
-        
+
         // Apply the columns of W as deviations
         // to the current state estimate.
         let x = self.x;
@@ -315,12 +348,12 @@ impl UKF {
         };
 
         // Current prediction and variance
-        self.x = ya;
-        self.P = PA;
+        self.update_estimate(ya);
+        self.update_variance(PA);
 
         // Intermediate values for `update`
-        self.Y = Y;
-        self.WP = WP;
+        self.update_predictions(Y);
+        self.update_deltas(WP);
 
         return self.x;
     }
@@ -380,11 +413,8 @@ impl UKF {
         let P = self.P - K * PV * K.transpose();
 
         // Update the internal state
-        self.x = State {
-            pose: x.pose.normalized(),
-            ..x
-        };
-        self.P = P;
+        self.update_estimate(x);
+        self.update_variance(P);
 
         return self.x;
     }

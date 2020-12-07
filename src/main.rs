@@ -197,9 +197,10 @@ async fn test_future() {
     // NOTE!!!: Don't put the instantiation inside the loop...
     let mut filter = ukf2::UKF::new();
     let mut i = 0;
+    let start_ticks = 0;
     loop {
-        i += 1;
-        if get_ticks() - last_ticks > 20 {
+        //if get_ticks() - last_ticks > 0 {
+            i += 1;
             let acc_sample = lsm.acceleration().await.unwrap();
             let rate_sample = lsm.angular_rate().await.unwrap();
             let bmp_sample = bmp.pressure_temperature().await.unwrap();
@@ -227,12 +228,16 @@ async fn test_future() {
                     ax,
                     ay,
                     az,
-                    rate_sample.gx * PI / 180.0,
-                    rate_sample.gy * PI / 180.0,
-                    rate_sample.gz * PI / 180.0
+                    (rate_sample.gx - gbx) * PI / 180.0,
+                    (rate_sample.gy - gby) * PI / 180.0,
+                    (rate_sample.gz - gbz) * PI / 180.0
                 ),
                 Matrix::<f32, 6, 6>::identity() * 0.02,
             );
+            if i >= 1000 {
+                rprintln!("{} {}", get_ticks() - start_ticks, estimate.wx);
+                asm::bkpt();
+            }
             //if i >15{panic!()}
             
             //// Construct a quaternion rotating from the Earth
@@ -268,18 +273,18 @@ async fn test_future() {
             //    )
             //};
             //last_quat = (acc_quat.scale(0.05) + gyro_quat.scale(0.95)).normalized();
-            let mut msg = [0 as u8; 70];
-            //rprintln!("{:?}", last_quat);
-            write!(
-                Wrapper::new(&mut msg),
-                "w{}wa{}ab{}bc{}c\r\n",
-                estimate.pose.w(),
-                estimate.pose.x(),
-                estimate.pose.y(),
-                estimate.pose.z()
-            )
-            .unwrap();
-            usart::write_message(&msg).await.unwrap();
+            //let mut msg = [0 as u8; 70];
+            ////rprintln!("{:?}", last_quat);
+            //write!(
+            //    Wrapper::new(&mut msg),
+            //    "w{}wa{}ab{}bc{}c\r\n",
+            //    estimate.pose.w(),
+            //    estimate.pose.x(),
+            //    estimate.pose.y(),
+            //    estimate.pose.z()
+            //)
+            //.unwrap();
+            //usart::write_message(&msg).await.unwrap();
             //rprintln!(
             //    "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
             //    acc_sample.ax - abx,
@@ -292,6 +297,6 @@ async fn test_future() {
             //    bmp_sample.temp
             //);
             last_ticks = get_ticks();
-        }
+        //}
     }
 }
