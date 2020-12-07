@@ -1,3 +1,5 @@
+// TODO: Match all the naming exactly with datasheet
+
 use super::i2c::{read_register, write_register, I2CError};
 use core::future::Future;
 use core::ops::Add;
@@ -106,6 +108,7 @@ const SW_RESET_SHIFT: u8 = 0;
 const SW_RESET_MASK: u8 = 0b1 << SW_RESET_SHIFT;
 const SW_RESET: u8 = SW_RESET_MASK;
 
+// OUT_XYZ_XL
 const OUT_XYZXL_ADDR: u8 = 0x28;
 const OUT_XYZXL_BYTES: usize = 6;
 
@@ -113,6 +116,110 @@ const OUT_XYZXL_BYTES: usize = 6;
 // WHOAMI
 const WHOAMI_M_ADDR: u8 = 0x0F;
 const WHOAMI_M_BYTES: usize = 1;
+
+// CTRL_REG1_M
+const CTRL_1M_ADDR: u8 = 0x20;
+const CTRL_1M_BYTES: u8 = 1;
+const CTRL_1M_RESET: u8 = 0b00010000;
+
+const TEMP_COMP_SHIFT: u8 = 7;
+const TEMP_COMP_MASK: u8 = 0b1 << TEMP_COMP_SHIFT;
+const TEMP_COMP_ENABLED: u8 = TEMP_COMP_MASK;
+
+const XY_OM_SHIFT: u8 = 5;
+const XY_OM_MASK: u8 = 0b11 << XY_OM_SHIFT;
+
+const FAST_ODR_SHIFT: u8 = 1;
+const FAST_ODR_MASK: u8 = 0b1 << FAST_ODR_SHIFT;
+const FAST_ODR_ENABLED: u8 = FAST_ODR_MASK;
+
+const ODR_M_SHIFT: u8 = 2;
+const ODR_M_MASK: u8 = 0b111 << ODR_M_SHIFT;
+#[repr(u8)]
+#[derive(Copy, Clone)]
+pub enum MagODR {
+    HZ0_625 = 0b000 << ODR_M_SHIFT,
+    HZ1_25 = 0b001 << ODR_M_SHIFT,
+    HZ2_5 = 0b010 << ODR_M_SHIFT,
+    HZ5 = 0b011 << ODR_M_SHIFT,
+    HZ10 = 0b100 << ODR_M_SHIFT,
+    HZ20 = 0b101 << ODR_M_SHIFT,
+    HZ40 = 0b110 << ODR_M_SHIFT,
+    HZ80 = 0b111 << ODR_M_SHIFT,
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone)]
+enum XYOperativeMode {
+    LowPower = 0b00 << XY_OM_SHIFT,
+    MediumPerformance = 0b01 << XY_OM_SHIFT,
+    HighPerformance = 0b10 << XY_OM_SHIFT,
+    UltraHighPerformance = 0b11 << XY_OM_SHIFT,
+}
+
+// CTRL_REG2_M
+const CTRL_2M_ADDR: u8 = 0x21;
+const CTRL_2M_BYTES: u8 = 1;
+const CTRL_2M_RESET: u8 = 0;
+
+const SOFT_RST_SHIFT: u8 = 2;
+const SOFT_RST_MASK: u8 = 0b1 << SOFT_RST_SHIFT;
+const SOFT_RST: u8 = SOFT_RST_MASK;
+
+const FS_M_SHIFT: u8 = 5;
+const FS_M_MASK: u8 = 0b11 << FS_M_SHIFT;
+#[repr(u8)]
+#[derive(Copy, Clone)]
+pub enum MagFS {
+    G4 = 0b00 << FS_M_SHIFT,
+    G8 = 0b01 << FS_M_SHIFT,
+    G12 = 0b10 << FS_M_SHIFT,
+    G16 = 0b11 << FS_M_SHIFT,
+}
+
+fn mag_fs_to_numeric(fs: MagFS) -> f32 {
+    return match fs {
+        MagFS::G4 => 0.14 / 1000.0,
+        MagFS::G8 => 0.29 / 1000.0,
+        MagFS::G12 => 0.43 / 1000.0,
+        MagFS::G16 => 0.58 / 1000.0,
+    };
+}
+
+// CTRL_REG3_M
+const CTRL_3M_ADDR: u8 = 0x22;
+const CTRL_3M_BYTES: u8 = 1;
+const CTRL_3M_RESET: u8 = 0b00000011;
+
+const OP_MODE_SHIFT: u8 = 0;
+const OP_MODE_MASK: u8 = 0b11 << OP_MODE_SHIFT;
+#[repr(u8)]
+#[derive(Copy, Clone)]
+enum MagOperatingMode {
+    Continuous = 0b00 << OP_MODE_SHIFT,
+    Single = 0b01 << OP_MODE_SHIFT,
+    PowerDown = 0b11 << OP_MODE_SHIFT,
+}
+
+// CTRL_REG4_M
+const CTRL_4M_ADDR: u8 = 0x23;
+const CTRL_4M_BYTES: u8 = 1;
+const CTRL_4M_RESET: u8 = 0;
+
+const Z_OM_SHIFT: u8 = 2;
+const Z_OM_MASK: u8 = 0b11 << Z_OM_SHIFT;
+#[repr(u8)]
+#[derive(Copy, Clone)]
+enum ZOperativeMode {
+    LowPower = 0b00 << Z_OM_SHIFT,
+    MediumPerformance = 0b01 << Z_OM_SHIFT,
+    HighPerformance = 0b10 << Z_OM_SHIFT,
+    UltraHighPerformance = 0b11 << Z_OM_SHIFT,
+}
+
+// OUT_XYZ_M
+const OUT_XYZM_ADDR: u8 = 0x28;
+const OUT_XYZM_BYTES: usize = 6;
 
 pub struct AccReading {
     pub ax: f32,
@@ -126,7 +233,7 @@ pub struct GyroReading {
     pub gz: f32,
 }
 
-struct MagReading {
+pub struct MagReading {
     pub mx: f32,
     pub my: f32,
     pub mz: f32,
@@ -138,8 +245,10 @@ pub struct Settings {
     mag_addr: u8,
     acc_odr: AccODR,
     gyro_odr: GyroODR,
+    mag_odr: MagODR,
     acc_fs: AccFS,
     gyro_fs: GyroFS,
+    mag_fs: MagFS,
 }
 
 impl Default for Settings {
@@ -149,8 +258,10 @@ impl Default for Settings {
             mag_addr: 0x1E,
             acc_odr: AccODR::HZ952,
             gyro_odr: GyroODR::HZ952,
+            mag_odr: MagODR::HZ80,
             acc_fs: AccFS::G16,
             gyro_fs: GyroFS::DPS500,
+            mag_fs: MagFS::G4,
         };
     }
 }
@@ -164,12 +275,20 @@ impl Settings {
         self.gyro_odr = odr;
         return self;
     }
+    pub fn set_mag_odr(&mut self, odr: MagODR) -> &mut Settings {
+        self.mag_odr = odr;
+        return self;
+    }
     pub fn set_acc_fs(&mut self, fs: AccFS) -> &mut Settings {
         self.acc_fs = fs;
         return self;
     }
     pub fn set_gyro_fs(&mut self, fs: GyroFS) -> &mut Settings {
         self.gyro_fs = fs;
+        return self;
+    }
+    pub fn set_mag_fs(&mut self, fs: MagFS) -> &mut Settings {
+        self.mag_fs = fs;
         return self;
     }
     pub async fn init(self) -> Result<LSM, LSMError> {
@@ -188,6 +307,7 @@ impl Settings {
             return Err(LSMError::SensorNotFound);
         }
 
+        // Check that the mag is detected
         let mut who_am_i_m = [0; WHOAMI_M_BYTES];
         if let Err(error) = read_register(self.mag_addr, WHOAMI_M_ADDR, &mut who_am_i_m).await {
             match error {
@@ -206,6 +326,9 @@ impl Settings {
         write_register(self.acc_gyro_addr, CTRL_REG8_ADDR, &[SW_RESET])
             .await
             .unwrap();
+        write_register(self.mag_addr, CTRL_2M_ADDR, &[SOFT_RST])
+            .await
+            .unwrap();
 
         // Perform initialization
         let mut ctrl_1g = modify_bits(CTRL_1G_RESET, ODR_G_MASK, self.gyro_odr as u8);
@@ -219,6 +342,38 @@ impl Settings {
         write_register(self.acc_gyro_addr, CTRL_6XL_ADDR, &[ctrl_6xl])
             .await
             .unwrap();
+
+        let mut ctrl_1m = modify_bits(
+            CTRL_1M_RESET,
+            XY_OM_MASK,
+            XYOperativeMode::HighPerformance as u8,
+        );
+        ctrl_1m = modify_bits(ctrl_1m, TEMP_COMP_MASK, TEMP_COMP_ENABLED);
+        ctrl_1m = modify_bits(ctrl_1m, FAST_ODR_MASK, FAST_ODR_ENABLED);
+        ctrl_1m = modify_bits(ctrl_1m, ODR_M_MASK, self.mag_odr as u8);
+        write_register(self.mag_addr, CTRL_1M_ADDR, &[ctrl_1m])
+            .await
+            .unwrap();
+
+        let ctrl_2m = modify_bits(CTRL_2M_RESET, FS_M_MASK, self.mag_fs as u8);
+        write_register(self.mag_addr, CTRL_2M_ADDR, &[ctrl_2m])
+            .await
+            .unwrap();
+
+        let ctrl_4m = modify_bits(
+            CTRL_4M_RESET,
+            Z_OM_MASK,
+            ZOperativeMode::UltraHighPerformance as u8,
+        );
+        write_register(self.mag_addr, CTRL_4M_ADDR, &[ctrl_4m])
+            .await
+            .unwrap();
+
+        let ctrl_3m = modify_bits(CTRL_3M_RESET, OP_MODE_MASK, MagOperatingMode::Continuous as u8);
+        write_register(self.mag_addr, CTRL_3M_ADDR, &[ctrl_3m])
+            .await
+            .unwrap();
+
         return Ok(LSM { settings: self });
     }
 }
@@ -256,6 +411,18 @@ impl LSM {
                 * gyro_fs_to_numeric(self.settings.gyro_fs),
             gz: i16::from_le_bytes([xyz_g[4], xyz_g[5]]) as f32
                 * gyro_fs_to_numeric(self.settings.gyro_fs),
+        });
+    }
+    pub async fn magnetic(&self) -> Result<MagReading, I2CError> {
+        let mut xyz_m = [0; OUT_XYZM_BYTES];
+        read_register(self.settings.mag_addr, OUT_XYZM_ADDR, &mut xyz_m).await?;
+        return Ok(MagReading {
+            mx: i16::from_le_bytes([xyz_m[0], xyz_m[1]]) as f32
+                * mag_fs_to_numeric(self.settings.mag_fs),
+            my: i16::from_le_bytes([xyz_m[2], xyz_m[3]]) as f32
+                * mag_fs_to_numeric(self.settings.mag_fs),
+            mz: i16::from_le_bytes([xyz_m[4], xyz_m[5]]) as f32
+                * mag_fs_to_numeric(self.settings.mag_fs),
         });
     }
 }
