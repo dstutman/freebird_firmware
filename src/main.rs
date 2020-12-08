@@ -196,20 +196,57 @@ async fn test_future() {
 
     // NOTE!!!: Don't put the instantiation inside the loop...
     let mut filter = ukf2::UKF::new();
-    let mut i = 0;
-    let start_ticks = 0;
     loop {
-        //if get_ticks() - last_ticks > 0 {
-            i += 1;
+        if get_ticks() - last_ticks > 20 {
             let acc_sample = lsm.acceleration().await.unwrap();
             let rate_sample = lsm.angular_rate().await.unwrap();
-            let bmp_sample = bmp.pressure_temperature().await.unwrap();
+            //let mag_sample = lsm.magnetic().await.unwrap();
+            //let mut msg = [0 as u8; 100];
+            //let mag_mat = Matrix::from_array([[-mag_sample.my, -mag_sample.mx, mag_sample.mz]]);
+            //let antibias = Matrix::from_array([[42.65, -35.44, -37.62]]) / 100.0;
+            //let antidistortion = Matrix::from_array([
+            //    [1.003, 0.031, 0.015],
+            //    [0.031, 0.957, 0.003],
+            //    [-0.015, 0.003, 1.044],
+            //]);
+            //let mag_corrected = (mag_mat + antibias / 100.0);
+            //write!(
+            //    Wrapper::new(&mut msg),
+            //    "Uni:{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}\r\n",
+            //    ((acc_sample.ax - abx) * 9.80665),     // as i32,
+            //    ((acc_sample.ay - aby) * 9.80665),     // as i32,
+            //    ((acc_sample.az - abz) * 9.80665),     // as i32,
+            //    ((rate_sample.gx - gbx) * PI / 180.0), // as i32,
+            //    ((rate_sample.gy - gby) * PI / 180.0), // as i32,
+            //    ((rate_sample.gz - gbz) * PI / 180.0), // as i32,
+            //    (mag_corrected[(0, 0)] * 100.0),       // as i32,
+            //    (mag_corrected[(1, 0)] * 100.0),       // as i32,
+            //    (mag_corrected[(2, 0)] * 100.0),       // as i32
+            //)
+            //.unwrap();
+            //rprintln!(
+            //    "{}, {}, {}, {}",
+            //    mag_corrected[(0, 0)],
+            //    mag_corrected[(1, 0)],
+            //    mag_corrected[(2, 0)],
+            //    libm::sqrtf(
+            //        libm::powf(mag_corrected[(0, 0)], 2.0)
+            //            + libm::powf(mag_corrected[(1, 0)], 2.0)
+            //            + libm::powf(mag_corrected[(2, 0)], 2.0)
+            //    )
+            //);
+            //usart::write_message(&msg).await.unwrap();
+            //let bmp_sample = bmp.pressure_temperature().await.unwrap();
+            let mut Q = Matrix::identity() * libm::powf(3.0*PI/2.0, 2.0);
+            Q[(3, 3)] = libm::powf(6.0*PI/3.0, 2.0);
+            Q[(4, 4)] = libm::powf(6.0*PI/3.0, 2.0);
+            Q[(5, 5)] = libm::powf(6.0*PI/3.0, 2.0);
             let prediction = filter.predict(
                 //Matrix6::<f32>::new(
                 //    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                 //    0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.,
                 //)*0.9,
-                Matrix::<f32, 6, 6>::identity(),
+                Q*0.5,
                 (get_ticks() - last_ticks) as f32 / 1000.0,
             );
 
@@ -221,8 +258,8 @@ async fn test_future() {
             ay /= norm_a;
             az /= norm_a;
             //rprintln!("{}, {}, {}", ax, ay, az);
-            let fake_mag =
-                prediction.pose * Quaternion::new(0.0, 1.0, 0.0, 0.0) * prediction.pose.conj();
+            let fake_pose = Quaternion::new(0.0, 1.0, 0.0, 0.0);
+            let fake_mag = fake_pose * Quaternion::new(0.0, 1.0, 0.0, 0.0) * fake_pose.conj();
             let estimate = filter.update(
                 ukf2::Observation::new(
                     ax,
@@ -230,73 +267,68 @@ async fn test_future() {
                     az,
                     (rate_sample.gx - gbx) * PI / 180.0,
                     (rate_sample.gy - gby) * PI / 180.0,
-                    (rate_sample.gz - gbz) * PI / 180.0
+                    (rate_sample.gz - gbz) * PI / 180.0,
                 ),
-                Matrix::<f32, 6, 6>::identity() * 0.02,
+                Matrix::identity() * libm::powf(0.01, 2.0),
             );
-            if i >= 1000 {
-                rprintln!("{} {}", get_ticks() - start_ticks, estimate.wx);
-                asm::bkpt();
-            }
-            //if i >15{panic!()}
-            
-            //// Construct a quaternion rotating from the Earth
-            //// frame to the measured frame.
-            //let gyro_quat = {
-            //    let dt: f32 = (get_ticks() - last_ticks) as f32 / 1000.;
-            //    Quaternion::new(
-            //        1.,
-            //        rate_sample.gx / 180. * PI * dt / 2.,
-            //        rate_sample.gy / 180. * PI * dt / 2.,
-            //        -rate_sample.gz / 180. * PI * dt / 2.,
-            //    )
-            //    .normalized()
-            //        * last_quat
-            //};
-            //let acc_quat = {
-            //    use libm::{powf, sqrtf};
-            //    // Because the expected gravity vector is [0 0 1] in our coordinate system
-            //    // The dot product of the gravity vector and the observation is the measured
-            //    // z value.
-            //    // The sensor z is inverted WRT our coordinate system.
-            //    let dot = acc_sample.az
-            //        / sqrtf(
-            //            powf(acc_sample.ax, 2.) + powf(acc_sample.ay, 2.) + powf(acc_sample.az, 2.),
-            //        );
-            //    let cos_ht = sqrtf((1. + dot) / 2.);
-            //    let sin_ht = sqrtf((1. - dot) / 2.);
-            //    Quaternion::new(
-            //        cos_ht,
-            //        acc_sample.ax * sin_ht,
-            //        acc_sample.ay * sin_ht,
-            //        acc_sample.az * sin_ht,
-            //    )
-            //};
-            //last_quat = (acc_quat.scale(0.05) + gyro_quat.scale(0.95)).normalized();
-            //let mut msg = [0 as u8; 70];
+            //
+            ////// Construct a quaternion rotating from the Earth
+            ////// frame to the measured frame.
+            ////let gyro_quat = {
+            ////    let dt: f32 = (get_ticks() - last_ticks) as f32 / 1000.;
+            ////    Quaternion::new(
+            ////        1.,
+            ////        rate_sample.gx / 180. * PI * dt / 2.,
+            ////        rate_sample.gy / 180. * PI * dt / 2.,
+            ////        -rate_sample.gz / 180. * PI * dt / 2.,
+            ////    )
+            ////    .normalized()
+            ////        * last_quat
+            ////};
+            ////let acc_quat = {
+            ////    use libm::{powf, sqrtf};
+            ////    // Because the expected gravity vector is [0 0 1] in our coordinate system
+            ////    // The dot product of the gravity vector and the observation is the measured
+            ////    // z value.
+            ////    // The sensor z is inverted WRT our coordinate system.
+            ////    let dot = acc_sample.az
+            ////        / sqrtf(
+            ////            powf(acc_sample.ax, 2.) + powf(acc_sample.ay, 2.) + powf(acc_sample.az, 2.),
+            ////        );
+            ////    let cos_ht = sqrtf((1. + dot) / 2.);
+            ////    let sin_ht = sqrtf((1. - dot) / 2.);
+            ////    Quaternion::new(
+            ////        cos_ht,
+            ////        acc_sample.ax * sin_ht,
+            ////        acc_sample.ay * sin_ht,
+            ////        acc_sample.az * sin_ht,
+            ////    )
+            ////};
+            ////last_quat = (acc_quat.scale(0.05) + gyro_quat.scale(0.95)).normalized();
+            let mut msg = [0 as u8; 70];
             ////rprintln!("{:?}", last_quat);
-            //write!(
-            //    Wrapper::new(&mut msg),
-            //    "w{}wa{}ab{}bc{}c\r\n",
-            //    estimate.pose.w(),
-            //    estimate.pose.x(),
-            //    estimate.pose.y(),
-            //    estimate.pose.z()
-            //)
-            //.unwrap();
-            //usart::write_message(&msg).await.unwrap();
-            //rprintln!(
-            //    "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
-            //    acc_sample.ax - abx,
-            //    acc_sample.ay - aby,
-            //    acc_sample.az - abz,
-            //    rate_sample.gx - gbx,
-            //    rate_sample.gy - gby,
-            //    rate_sample.gz - gbz,
-            //    bmp_sample.press,
-            //    bmp_sample.temp
-            //);
+            write!(
+                Wrapper::new(&mut msg),
+                "w{}wa{}ab{}bc{}c\r\n",
+                estimate.pose.w(),
+                estimate.pose.x(),
+                estimate.pose.y(),
+                estimate.pose.z()
+            )
+            .unwrap();
+            usart::write_message(&msg).await.unwrap();
+            ////rprintln!(
+            ////    "(ax, ay, az): ({:.2}, {:.2}, {:.2}), (gx, gy, gz): ({:.2}, {:.2}, {:.2}), (p, t): ({:.2}, {:.2})",
+            ////    acc_sample.ax - abx,
+            ////    acc_sample.ay - aby,
+            ////    acc_sample.az - abz,
+            ////    rate_sample.gx - gbx,
+            ////    rate_sample.gy - gby,
+            ////    rate_sample.gz - gbz,
+            ////    bmp_sample.press,
+            ////    bmp_sample.temp
+            ////);
             last_ticks = get_ticks();
-        //}
+        }
     }
 }

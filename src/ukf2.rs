@@ -36,7 +36,7 @@ impl State {
             wy: swy / n,
             wz: swz / n,
         };
-    }
+    } 
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -47,6 +47,9 @@ pub struct Observation {
     wx: f32,
     wy: f32,
     wz: f32,
+//    mx: f32,
+//    my: f32,
+//    mz: f32
 }
 
 impl Observation {
@@ -69,14 +72,14 @@ impl Observation {
         let mut swx = 0.0;
         let mut swy = 0.0;
         let mut swz = 0.0;
-        for x in observations {
+        for o in observations {
             n += 1.0;
-            sax += x.ax;
-            say += x.ay;
-            saz += x.az;
-            swx += x.wx;
-            swy += x.wy;
-            swz += x.wz;
+            sax += o.ax;
+            say += o.ay;
+            saz += o.az;
+            swx += o.wx;
+            swy += o.wy;
+            swz += o.wz;
         }
         return Observation {
             ax: sax / n,
@@ -102,7 +105,7 @@ impl From<Matrix<f32, 6, 1>> for Observation {
     }
 }
 
-impl From<Observation> for Matrix<f32, 6, 1> {
+impl From<Observation> for Matrix<f32, M, 1> {
     fn from(obs: Observation) -> Self {
         return Matrix::from_array([[obs.ax, obs.ay, obs.az, obs.wx, obs.wy, obs.wz]]);
     }
@@ -189,9 +192,9 @@ fn f(x: State, dt: f32) -> State {
 fn h(x: State) -> Observation {
     let State { pose, wx, wy, wz } = x;
 
-    // Represent the Earth frame gravitational acceleration
-    // vector as a quaternion. Then q * v * q* gives the
-    // body frame gravity vector represented as a quaternion.
+    // Represent the Earth frame gravitational acceleration as a 
+    // quaternion. Then q * v * q* gives the body frame gravity 
+    // vector represented as a quaternion.
     let ae = Quaternion::new(0.0, 0.0, 0.0, 1.0);
     let ab = pose * ae * pose.conj();
     return Observation {
@@ -260,7 +263,7 @@ impl UKF {
     pub fn new() -> UKF {
         return UKF {
             x: Default::default(),
-            P: Matrix::identity() * 0.05,
+            P: Matrix::identity() * 1.0,
             Y: Default::default(),
             WP: Default::default(),
         };
@@ -303,7 +306,7 @@ impl UKF {
     // It returns the updated prediction.
     pub fn predict(&mut self, Q: Matrix<f32, N, N>, dt: f32) -> State {
         // Calculate the sigma deviations
-        let W = (self.P * N as f32).cholesky();
+        let W = (self.P * dt * N as f32).cholesky();
         //rprintln!("{:?}", self.P * N as f32);
         check_notnan(W);
 
@@ -349,7 +352,7 @@ impl UKF {
 
         // Current prediction and variance
         self.update_estimate(ya);
-        self.update_variance(PA);
+        self.update_variance(PA / dt);
 
         // Intermediate values for `update`
         self.update_predictions(Y);
